@@ -37,7 +37,7 @@ def parse_weeks(weeks: str) -> list[int]:
     final: list[int] = []
 
     for w in groups:
-        w = w.split("-")
+        w = w.split("-")  # noqa: PLW2901
 
         if len(w) == 1:
             final.append(int(w[0]))
@@ -168,8 +168,10 @@ async def gather_events(
 
 # Converted to python and modified from
 # https://github.com/HubSpot/humanize/blob/master/src/humanize.js#L439-L475
-def title_case(text: str):
-    def do_title_case(_text: str, hyphenated: bool = False, first_or_last: bool = True):
+def title_case(text: str) -> str:
+    def do_title_case(
+        _text: str, hyphenated: bool = False, first_or_last: bool = True
+    ) -> str:
         title_cased_array: list[str] = []
         string_array = re.split(
             SPLIT_ON_HYPHENS if hyphenated else SPLIT_ON_WHITESPACE, _text
@@ -233,7 +235,7 @@ class EventDisplayData:
         return [cls.from_event(event) for event in events]
 
     @classmethod
-    def from_event(cls, event: models.Event) -> typing.Self:
+    def from_event(cls, event: models.Event) -> typing.Self:  # noqa: PLR0912, PLR0915
         # SUMMARY
 
         name = re.sub(SEMESTER_CODE, "", n) if (n := event.module_name) else event.name
@@ -264,7 +266,7 @@ class EventDisplayData:
         # LOCATIONS
 
         if event.locations:
-            # dict[(campus, building)] = [locations]
+            # dict[(campus, building)] = [locations]  # noqa: ERA001
             locations: dict[tuple[str, str] | None, list[models.Location]] = (
                 collections.defaultdict(list)
             )
@@ -289,8 +291,8 @@ class EventDisplayData:
                 campus, building = main
                 building = models.BUILDINGS[campus].get(building, "[unknown]")
                 campus = models.CAMPUSES[campus]
-                locs = sorted(locs, key=lambda r: r.room)
-                locs = sorted(locs, key=lambda r: ORDER.index(r.floor))
+                locs = sorted(locs, key=lambda r: r.room)  # noqa: PLW2901
+                locs = sorted(locs, key=lambda r: ORDER.index(r.floor))  # noqa: PLW2901
                 locations_long.append(
                     f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))} ({building}, {campus})"
                 )

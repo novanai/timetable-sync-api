@@ -18,7 +18,7 @@ INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
 
 class API:
-    def __init__(self):
+    def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
         self.cache = cache_.Cache()
 
@@ -75,8 +75,7 @@ class API:
                     await asyncio.sleep(5)
                     continue
 
-                data = await res.json(loads=orjson.loads)
-                return data
+                return await res.json(loads=orjson.loads)
 
     async def fetch_category(
         self,

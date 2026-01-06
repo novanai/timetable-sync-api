@@ -8,7 +8,6 @@ import uuid
 import aiohttp
 import icalendar
 import orjson
-
 from rapidfuzz import fuzz
 from rapidfuzz import utils as fuzz_utils
 
@@ -107,7 +106,7 @@ SITE = "dcuclubsandsocs.ie"
 
 
 class API:
-    def __init__(self):
+    def __init__(self) -> None:
         self._session: aiohttp.ClientSession | None = None
 
     @property

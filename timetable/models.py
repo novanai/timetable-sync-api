@@ -316,7 +316,7 @@ class Event(ModelBase):
     """
     name: str
     """The name of the event.
-    
+
     If this is in the form `MODULE[SEMESTER]EVENT/ACTIVITY/GROUP` (e.g. `"CSC1003[1]OC/L1/01"`),
     then `Event.parsed_name_data` will be available.
     """
@@ -433,9 +433,7 @@ class ParsedNameData(ModelBase):
             ]
 
             sem = match.group("semester")
-            if sem == "1,2":
-                sem = "0"
-            elif sem == "F":
+            if sem in {"1,2", "F"}:
                 sem = "0"
             semester = Semester(int(sem))
 
@@ -444,9 +442,7 @@ class ParsedNameData(ModelBase):
             if dt is not None:
                 if dt == "0C":
                     dt = "OC"
-                elif dt == "AS":
-                    dt = "AY"
-                elif dt == "ASY":
+                elif dt in {"AS", "ASY"}:
                     dt = "AY"
                 delivery_type = DeliveryType(dt)
             else:
@@ -487,7 +483,7 @@ class Location(ModelBase):
     building: str
     """The building code.
     ### Examples
-    `"L"`, `"SA"` 
+    `"L"`, `"SA"`
     """
     floor: str
     """The floor code.
@@ -508,7 +504,7 @@ class Location(ModelBase):
         locations: list[str] = []
 
         for loc in location.split(","):
-            loc = loc.strip()
+            loc = loc.strip()  # noqa: PLW2901
             if "&" in loc:
                 campus, rooms = loc.split(".")
                 rooms = [r.strip() for r in rooms.split("&")]
@@ -542,7 +538,7 @@ class Location(ModelBase):
             f"{self.floor}.{self.room}, "
             f"{building_name} ({self.building}), "
             f"{CAMPUSES[self.campus]} ({self.campus})"
-            + (f", ({str(self)})" if include_original else "")
+            + (f", ({self!s})" if include_original else "")
         )
 
 
@@ -557,10 +553,10 @@ class ResponseFormat(enum.Enum):
     """Unknown."""
 
     @classmethod
-    def from_str(cls, format: str | None) -> typing.Self:
-        format = format.lower() if format else "ical"
+    def from_str(cls, format_: str | None) -> typing.Self:
+        format_ = format_.lower() if format_ else "ical"
         try:
-            return cls(format)
+            return cls(format_)
         except ValueError:
             return cls("unknown")
 

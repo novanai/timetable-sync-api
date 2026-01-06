@@ -8,8 +8,8 @@ import orjson
 from rapidfuzz import fuzz
 from rapidfuzz import utils as fuzz_utils
 
-from src import __version__, models, utils
-from src import cache as cache_
+from timetable import __version__, models, utils
+from timetable import cache as cache_
 
 logger = logging.getLogger(__name__)
 

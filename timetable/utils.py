@@ -10,11 +10,11 @@ import typing
 import icalendar
 import orjson
 
-from src import __version__, models
-from src.types import is_str_list
+from timetable import __version__, models
+from timetable.types import is_str_list
 
 if typing.TYPE_CHECKING:
-    from src import api as api_
+    from timetable import api as api_
 
 
 logger = logging.getLogger(__name__)

@@ -12,7 +12,7 @@ import orjson
 from rapidfuzz import fuzz
 from rapidfuzz import utils as fuzz_utils
 
-from src import __version__, utils
+from timetable import __version__, utils
 
 
 class GroupType(enum.Enum):

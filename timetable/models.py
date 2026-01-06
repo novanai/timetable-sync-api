@@ -8,7 +8,7 @@ import logging
 import re
 import typing
 
-from src import utils
+from timetable import utils
 
 logger = logging.getLogger(__name__)
 

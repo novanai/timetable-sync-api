@@ -18,9 +18,9 @@ INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
 
 class API:
-    def __init__(self) -> None:
+    def __init__(self, redis_address: str) -> None:
         self._session: aiohttp.ClientSession | None = None
-        self.cache = cache_.Cache()
+        self.cache = cache_.Cache(redis_address)
 
     @property
     def session(self) -> aiohttp.ClientSession:

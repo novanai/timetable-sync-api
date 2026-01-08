@@ -1,7 +1,6 @@
 import dataclasses
 import datetime
 import enum
-import os
 import typing
 import uuid
 
@@ -106,7 +105,8 @@ SITE = "dcuclubsandsocs.ie"
 
 
 class API:
-    def __init__(self) -> None:
+    def __init__(self, cns_address: str) -> None:
+        self.cns_address = cns_address
         self._session: aiohttp.ClientSession | None = None
 
     @property
@@ -117,9 +117,7 @@ class API:
         return self._session
 
     async def get_data(self, url: str) -> typing.Any:
-        async with self.session.request(
-            "GET", f"{os.environ['CNS_ADDRESS']}/{url}"
-        ) as r:
+        async with self.session.request("GET", f"{self.cns_address}/{url}") as r:
             r.raise_for_status()
             return await r.json(loads=orjson.loads)
 

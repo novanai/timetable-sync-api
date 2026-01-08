@@ -1,5 +1,4 @@
 import datetime
-import os
 import typing
 
 import orjson
@@ -9,8 +8,8 @@ from redis.asyncio import Redis
 class Cache:
     """A simple caching implementation using Redis."""
 
-    def __init__(self) -> None:
-        self.redis_conn = Redis.from_url(f"redis://{os.environ['REDIS_ADDRESS']}")
+    def __init__(self, redis_address: str) -> None:
+        self.redis_conn = Redis.from_url(f"redis://{redis_address}")
 
     async def set(
         self,

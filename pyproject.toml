@@ -1,12 +1,11 @@
 [project]
 name = "timetable-sync-api"
-version = "2.7.1"
 description = "API wrapper powering timetable-sync"
+dynamic = ["version"]
 readme = "README.md"
 requires-python = ">=3.13"
 license = { text = "MIT" }
-authors = [{ name = "nova", email = "novanai.dev@gmail.com"}]
-maintainers = [{ name = "nova", email = "novanai.dev@gmail.com"}]
+authors = [{ name = "nova" }]
 dependencies = [
     "aiohttp>=3.13.3",
     "icalendar>=6.3.2",

@@ -228,17 +228,18 @@ def generate_ical_file(events: dict[str, list[Event | Activity | Fixture]]) -> b
                 event.add("DTEND", item.end)
             event.add("DTSTAMP", item.start)
             event.add("SUMMARY", f"{item.name} [{group_name}]")
-            event.add(
-                "DESCRIPTION",
-                (
-                    f"Details: {item.description}\n"
-                    + (
-                        f"Cost: {f'€{item.cost:.2f}' if item.cost else 'FREE'}"
-                        if isinstance(item, Event)
-                        else ""
-                    )
-                ).strip(),
-            )
+            if item.description.strip():
+                event.add(
+                    "DESCRIPTION",
+                    (
+                        f"Details: {item.description}\n"
+                        + (
+                            f"Cost: {f'€{item.cost:.2f}' if item.cost else 'FREE'}"
+                            if isinstance(item, Event)
+                            else ""
+                        )
+                    ).strip(),
+                )
             if item.location is not None:
                 event.add("LOCATION", item.location)
             event.add("CLASS", "PUBLIC")

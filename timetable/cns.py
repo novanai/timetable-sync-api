@@ -209,7 +209,7 @@ def filter_category_results(
     return [r[0] for r in results]
 
 
-def generate_ical_file(events: dict[str, list[Event | Activity]]) -> bytes:
+def generate_ical_file(events: dict[str, list[Event | Activity | Fixture]]) -> bytes:
     calendar = icalendar.Calendar()
     calendar.add("METHOD", "PUBLISH")
     calendar.add(
@@ -224,7 +224,8 @@ def generate_ical_file(events: dict[str, list[Event | Activity]]) -> bytes:
             event.add("UID", uuid.uuid4())
             event.add("LAST-MODIFIED", item.start)
             event.add("DTSTART", item.start)
-            event.add("DTEND", item.end)
+            if isinstance(item, (Event, Activity)):
+                event.add("DTEND", item.end)
             event.add("DTSTAMP", item.start)
             event.add("SUMMARY", f"{item.name} [{group_name}]")
             event.add(
@@ -238,7 +239,8 @@ def generate_ical_file(events: dict[str, list[Event | Activity]]) -> bytes:
                     )
                 ).strip(),
             )
-            event.add("LOCATION", item.location)
+            if item.location is not None:
+                event.add("LOCATION", item.location)
             event.add("CLASS", "PUBLIC")
             calendar.add_component(event)
 

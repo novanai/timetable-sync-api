@@ -19,8 +19,10 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-ORDER: typing.Final[str] = "BG123456789"
+FLOOR_ORDER: typing.Final[str] = "BG123456789"
+# TODO: update semester code
 SEMESTER_CODE = re.compile(r"[\[\(][0-2F,]+[\]\)]")
+
 SMALL_WORDS = re.compile(
     r"\b(a|an|and|at|but|by|de|en|for|if|in|of|on|or|the|to|via|vs?\.?)\b",
     re.IGNORECASE,
@@ -47,6 +49,7 @@ def parse_weeks(weeks: str) -> list[int]:
     return final
 
 
+# TODO: this might need to include summer dates for those modules?
 def default_year_start_end_dates() -> tuple[datetime.datetime, datetime.datetime]:
     """Get default start and end dates for the academic year.
 
@@ -66,6 +69,7 @@ def default_year_start_end_dates() -> tuple[datetime.datetime, datetime.datetime
     return (start, end)
 
 
+# TODO: rename to something that makes sense
 def calc_start_end_range(
     start: datetime.datetime | None = None, end: datetime.datetime | None = None
 ) -> tuple[datetime.datetime, datetime.datetime]:
@@ -89,21 +93,21 @@ def calc_start_end_range(
 
 
 @dataclasses.dataclass
-class Category:
+class BasicCategoryItem:
     name: str
     identity: str
 
 
-async def get_basic_category_results(
+async def get_basic_category_items(
     api: api_.API,
     category_type: models.CategoryType,
     query: str | None = None,
-) -> list[Category]:
+) -> list[BasicCategoryItem]:
     result = await api.get_category(category_type, query=query)
     if not result:
         result = await api.fetch_category(category_type, query=query, cache=True)
 
-    return [Category(name=c.name, identity=c.identity) for c in result.items]
+    return [BasicCategoryItem(name=c.name, identity=c.identity) for c in result.items]
 
 
 async def resolve_to_category_items(
@@ -154,6 +158,7 @@ async def gather_events(
                 events.extend(timetable.events)
                 continue
 
+            # TODO: make a group_identities dict and fetch in one request
             # timetable needs to be fetched
             timetables = await api.fetch_category_items_timetables(
                 group,
@@ -292,7 +297,7 @@ class EventDisplayData:
                 building = models.BUILDINGS[campus].get(building, "[unknown]")
                 campus = models.CAMPUSES[campus]
                 locs = sorted(locs, key=lambda r: r.room)  # noqa: PLW2901
-                locs = sorted(locs, key=lambda r: ORDER.index(r.floor))  # noqa: PLW2901
+                locs = sorted(locs, key=lambda r: FLOOR_ORDER.index(r.floor))  # noqa: PLW2901
                 locations_long.append(
                     f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))} ({building}, {campus})"
                 )
@@ -332,6 +337,7 @@ class EventDisplayData:
         )
 
 
+# TODO: rename to 'create'
 def generate_ical_file(events: list[models.Event]) -> bytes:
     display_data = EventDisplayData.from_events(events)
 
@@ -362,6 +368,7 @@ def generate_ical_file(events: list[models.Event]) -> bytes:
     return calendar.to_ical()
 
 
+# TODO: same, rename to 'create'
 def generate_json_file(
     events: list[models.Event], display: bool | None = None
 ) -> bytes:

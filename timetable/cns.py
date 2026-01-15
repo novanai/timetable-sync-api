@@ -141,24 +141,24 @@ class API:
 
     async def fetch_unlocked_groups(
         self, group_type: GroupType
-    ) -> list[utils.Category]:
+    ) -> list[utils.BasicCategoryItem]:
         return [
-            utils.Category(name=d["name"], identity=d["id"])
+            utils.BasicCategoryItem(name=d["name"], identity=d["id"])
             for d in await self.get_data(f"{SITE}/{group_type.value}")
             if not d["is_locked"]
         ]
 
     async def fetch_group_info(
         self, group_type: GroupType, identity: str
-    ) -> utils.Category:
+    ) -> utils.BasicCategoryItem:
         d = await self.get_data(f"{SITE}/{group_type.value}/{identity}")
-        return utils.Category(name=d["name"], identity=identity)
+        return utils.BasicCategoryItem(name=d["name"], identity=identity)
 
 
 def filter_category_results(
-    categories: list[utils.Category], query: str
-) -> list[utils.Category]:
-    results: typing.Iterable[tuple[utils.Category, float]] = []
+    categories: list[utils.BasicCategoryItem], query: str
+) -> list[utils.BasicCategoryItem]:
+    results: typing.Iterable[tuple[utils.BasicCategoryItem, float]] = []
 
     for item in categories:
         ratio = fuzz.partial_ratio(

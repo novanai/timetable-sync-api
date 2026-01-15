@@ -18,9 +18,19 @@ INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
 
 class API:
-    def __init__(self, redis_address: str) -> None:
+    def __init__(self, valkey_client: cache_.ValkeyCache) -> None:
+        self._cache = valkey_client
         self._session: aiohttp.ClientSession | None = None
-        self.cache = cache_.Cache(redis_address)
+
+    @classmethod
+    async def create(cls, valkey_host: str, valkey_port: int) -> typing.Self:
+        valkey_client = await cache_.ValkeyCache.create(valkey_host, valkey_port)
+        return cls(valkey_client)
+
+    @property
+    def cache(self) -> cache_.ValkeyCache:
+        """The Valkey client to use for caching."""
+        return self._cache
 
     @property
     def session(self) -> aiohttp.ClientSession:
@@ -34,7 +44,7 @@ class API:
         path: str,
         params: dict[str, str] | None = None,
         json_data: dict[str, typing.Any] | None = None,
-    ) -> dict[str, typing.Any]:
+    ) -> typing.Any:
         """Get data from the api.
 
         Parameters
@@ -48,7 +58,7 @@ class API:
 
         Returns
         -------
-        dict[str, Any]
+        Any
             The fetched data.
         """
         retries = 0
@@ -129,7 +139,7 @@ class API:
                         f"CategoryTypes/{category_type.value}/Categories/FilterWithCache/{INSTITUTION_IDENTITY}",
                         params={
                             "pageNumber": str(i),
-                            "query": query or "",
+                            "query": query.strip() if query else "",
                         },
                     )
                     for i in range(2, total_pages + 1)
@@ -142,18 +152,16 @@ class API:
 
                 results.extend(d["Results"])
 
+        final_data = {"Results": results, "Count": count}
+
         if (query is None or not query.strip()) and cache:
             await self.cache.set(
                 category_type.value,
-                {
-                    "TotalPages": total_pages,
-                    "Results": results,
-                    "Count": count,
-                },
+                final_data,
                 expires_in=datetime.timedelta(days=1),
             )
 
-        return models.Category.from_payload({"Results": results, "Count": count})
+        return models.Category.from_payload(final_data)
 
     async def get_category(
         self,
@@ -240,7 +248,38 @@ class API:
         results = sorted(results, key=lambda r: r[1], reverse=True)
         return [r[0] for r in results[:count]]
 
-    # NOTE: there is no equivalent fetch method as the api endpoint does not exit
+    async def fetch_category_item(
+        self,
+        category_type: models.CategoryType,
+        item_identity: str,
+    ) -> models.CategoryItem:
+        """Fetch a category item from the api.
+
+        Parameters
+        ----------
+        category_type : models.CategoryType
+            The type of category type of the item.
+        item_identity : str
+            The identity of the item.
+        """
+
+        data = await self._fetch_data(
+            f"CategoryTypes/Categories/Filter/{INSTITUTION_IDENTITY}",
+            json_data={
+                "CategoryTypesWithIdentities": [
+                    {
+                        "CategoryTypeIdentity": category_type.value,
+                        "CategoryIdentities": [item_identity],
+                    },
+                ]
+            },
+        )
+
+        if not data:
+            raise ValueError("Invalid item ID provided.")
+
+        return models.CategoryItem.from_payload(data[0])
+
     async def get_category_item(
         self,
         category_type: models.CategoryType,

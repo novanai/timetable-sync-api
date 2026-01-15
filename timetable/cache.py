@@ -2,14 +2,22 @@ import datetime
 import typing
 
 import orjson
-from redis.asyncio import Redis
+from glide import GlideClient, GlideClientConfiguration, NodeAddress
 
 
-class Cache:
-    """A simple caching implementation using Redis."""
+class ValkeyCache:
+    """A simple caching implementation using Valkey."""
 
-    def __init__(self, redis_address: str) -> None:
-        self.redis_conn = Redis.from_url(f"redis://{redis_address}")
+    def __init__(self, client: GlideClient) -> None:
+        self.client = client
+
+    @classmethod
+    async def create(cls, host: str, port: int) -> typing.Self:
+        addresses = [NodeAddress(host, port)]
+        config = GlideClientConfiguration(addresses, request_timeout=500)
+        client = await GlideClient.create(config)
+
+        return cls(client)
 
     async def set(
         self,
@@ -26,10 +34,10 @@ class Cache:
         data : dict[str, typing.Any]
             The data to cache.
         """
-        await self.redis_conn.set(key, orjson.dumps(data))
-        await self.redis_conn.expire(key, expires_in)
+        await self.client.set(key, orjson.dumps(data))
+        await self.client.expire(key, int(expires_in.total_seconds()))
 
-    async def get(self, key: str) -> dict[str, typing.Any] | None:
+    async def get(self, key: str) -> typing.Any | None:
         """Get data stored under `key` from the cache.
 
         Parameters
@@ -44,8 +52,5 @@ class Cache:
         None
             If the data was not found.
         """
-        data = await self.redis_conn.get(key)
-        if data is None:
-            return None
-
-        return orjson.loads(data)
+        data = await self.client.get(key)
+        return orjson.loads(data) if data is not None else None

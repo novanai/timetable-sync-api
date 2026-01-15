@@ -11,7 +11,7 @@ dependencies = [
     "icalendar>=6.3.2",
     "orjson>=3.11.5",
     "rapidfuzz>=3.14.3",
-    "redis[hiredis]>=7.1.0",
+    "valkey-glide>=2.2.5",
 ]
 
 [project.urls]

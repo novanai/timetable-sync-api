@@ -217,7 +217,7 @@ class CategoryItem(ModelBase):
     category_type: CategoryType
     """The type of category this item belongs to."""
     parent_categories: list[str]
-    """Unique identities of the parent category(ies)."""
+    """Unique identities of the faculty(s) this item belongs to."""
     identity: str
     """Unique identity of this category item."""
     name: str

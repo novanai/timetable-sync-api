@@ -22,9 +22,6 @@ class GroupType(enum.Enum):
     """A society."""
 
 
-# TODO: add fixtures
-
-
 @dataclasses.dataclass
 class Event:
     """An event."""
@@ -37,6 +34,8 @@ class Event:
     """The event's start time."""
     end: datetime.datetime
     """The event's end time."""
+    day: str
+    """The day the event is on (`monday`, `tuesday`, etc.)."""
     cost: float
     """The event cost."""
     capacity: int | None
@@ -55,6 +54,7 @@ class Event:
             image=data["image"],
             start=datetime.datetime.fromisoformat(data["start"]),
             end=datetime.datetime.fromisoformat(data["end"]),
+            day=data["day"],
             cost=data["cost"],
             capacity=data["capacity"],
             type=data["type"],
@@ -101,6 +101,38 @@ class Activity:
         )
 
 
+@dataclasses.dataclass
+class Fixture:
+    """A fixture."""
+
+    name: str
+    """The fixture name."""
+    image: str | None
+    """The fixture poster."""
+    start: datetime.datetime
+    """The fixture's start time."""
+    competition: str
+    """The fixture competition."""
+    type: str
+    """The fixture type. Usually `HOME` or `AWAY`."""
+    location: str | None
+    """The fixture location."""
+    description: str
+    """The fixture description."""
+
+    @classmethod
+    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
+        return cls(
+            name=data["name"],
+            image=data["image"],
+            start=datetime.datetime.fromisoformat(data["start"]),
+            competition=data["competition"],
+            type=data["type"],
+            location=data["location"],
+            description=data["description"],
+        )
+
+
 SITE = "dcuclubsandsocs.ie"
 
 
@@ -121,11 +153,11 @@ class API:
             r.raise_for_status()
             return await r.json(loads=orjson.loads)
 
-    async def fetch_group_events_activities(
+    async def fetch_group_events_activities_fixtures(
         self,
         group_type: GroupType,
         identity: str,
-    ) -> list[Activity | Event]:
+    ) -> list[Activity | Event | Fixture]:
         events = [
             Event.from_payload(d)
             for d in await self.get_data(f"{SITE}/{group_type.value}/{identity}/events")
@@ -136,8 +168,14 @@ class API:
                 f"{SITE}/{group_type.value}/{identity}/activities"
             )
         ]
+        fixtures = [
+            Fixture.from_payload(d)
+            for d in await self.get_data(
+                f"{SITE}/{group_type.value}/{identity}/fixtures"
+            )
+        ]
 
-        return events + activities
+        return [*events, *activities, *fixtures]
 
     async def fetch_unlocked_groups(
         self, group_type: GroupType
@@ -191,12 +229,14 @@ def generate_ical_file(events: dict[str, list[Event | Activity]]) -> bytes:
             event.add("SUMMARY", f"{item.name} [{group_name}]")
             event.add(
                 "DESCRIPTION",
-                f"Details: {item.description}\n"
-                + (
-                    f"Cost: {f'€{item.cost:.2f}' if item.cost else 'FREE'}"
-                    if isinstance(item, Event)
-                    else ""
-                ),
+                (
+                    f"Details: {item.description}\n"
+                    + (
+                        f"Cost: {f'€{item.cost:.2f}' if item.cost else 'FREE'}"
+                        if isinstance(item, Event)
+                        else ""
+                    )
+                ).strip(),
             )
             event.add("LOCATION", item.location)
             event.add("CLASS", "PUBLIC")

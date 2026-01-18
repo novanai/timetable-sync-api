@@ -1,8 +1,18 @@
 import datetime
 import typing
 
-import orjson
-from glide import GlideClient, GlideClientConfiguration, NodeAddress
+import msgspec
+from glide import (
+    ExpirySet,
+    ExpiryType,
+    GlideClient,
+    GlideClientConfiguration,
+    NodeAddress,
+)
+
+from timetable import models
+
+T = typing.TypeVar("T", bound=models.PayloadModel)
 
 
 class ValkeyCache:
@@ -19,11 +29,11 @@ class ValkeyCache:
 
         return cls(client)
 
-    async def set(
+    async def _set(
         self,
         key: str,
-        data: dict[str, typing.Any],
-        expires_in: datetime.timedelta,
+        model: models.PayloadModel,
+        expires_in: datetime.timedelta | None = None,
     ) -> None:
         """Cache `data` under `key`.
 
@@ -31,26 +41,67 @@ class ValkeyCache:
         ----------
         key : str
             A unique identifier of the data being cached.
-        data : dict[str, typing.Any]
-            The data to cache.
+        model : models.PayloadModel
+            The data model to cache.
+        expires_in : datetime.timedelta | None, default None
+            The time this data will expire in.
         """
-        await self.client.set(key, orjson.dumps(data))
-        await self.client.expire(key, int(expires_in.total_seconds()))
+        if expires_in is None:
+            expires_in = datetime.timedelta(days=1)
 
-    async def get(self, key: str) -> typing.Any | None:
+        await self.client.set(
+            key,
+            msgspec.msgpack.encode(model),
+            expiry=ExpirySet(ExpiryType.SEC, expires_in),
+        )
+
+    async def _get(self, key: str, model_type: type[T]) -> T | None:
         """Get data stored under `key` from the cache.
 
         Parameters
         ----------
         key : str
             The unique key the data is stored under.
-
+        model_type : type[PayloadModel]
+            The type of the model.
         Returns
         -------
-        dict[str, typing.Any]
+        PayloadModel
             The data, if found.
         None
             If the data was not found.
         """
         data = await self.client.get(key)
-        return orjson.loads(data) if data is not None else None
+        return (
+            msgspec.msgpack.decode(data, type=model_type) if data is not None else None
+        )
+
+    async def set_category(
+        self, category_type: models.CategoryType, category: models.Category
+    ) -> None:
+        await self._set(f"category:{category_type.value}", category)
+
+    async def get_category(
+        self, category_type: models.CategoryType
+    ) -> models.Category | None:
+        return await self._get(f"category:{category_type.value}", models.Category)
+
+    async def set_category_item(self, item: models.CategoryItem) -> None:
+        await self._set(f"item:{item.identity}", item)
+
+    async def get_category_item(self, item_id: str) -> models.CategoryItem | None:
+        return await self._get(f"item:{item_id}", models.CategoryItem)
+
+    async def set_category_item_timetable(
+        self, timetable: models.CategoryItemTimetable
+    ) -> None:
+        await self._set(
+            f"timetable:{timetable.identity}",
+            timetable,
+            expires_in=datetime.timedelta(hours=12),
+        )
+
+    async def get_category_item_timetable(
+        self, item_id: str
+    ) -> models.CategoryItemTimetable | None:
+        return await self._get(f"timetable:{item_id}", models.CategoryItemTimetable)

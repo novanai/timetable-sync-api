@@ -4,7 +4,7 @@ import logging
 import typing
 
 import aiohttp
-import orjson
+import msgspec
 from rapidfuzz import fuzz
 from rapidfuzz import utils as fuzz_utils
 
@@ -85,7 +85,7 @@ class API:
                     await asyncio.sleep(5)
                     continue
 
-                return await res.json(loads=orjson.loads)
+                return await res.json(loads=msgspec.json.decode)
 
     async def fetch_category(
         self,
@@ -119,6 +119,8 @@ class API:
 
         results: list[dict[str, typing.Any]] = []
 
+        # NOTE: there is an "itemsPerPage" param but it does nothing,
+        # every page is always 20 items
         params: dict[str, str] = {
             "pageNumber": "1",
             "query": query.strip() if query else "",
@@ -153,15 +155,15 @@ class API:
                 results.extend(d["Results"])
 
         final_data = {"Results": results, "Count": count}
+        category = models.Category.from_payload(final_data)
 
         if (query is None or not query.strip()) and cache:
-            await self.cache.set(
-                category_type.value,
-                final_data,
-                expires_in=datetime.timedelta(days=1),
+            await self.cache.set_category(
+                category_type,
+                category,
             )
 
-        return models.Category.from_payload(final_data)
+        return category
 
     async def get_category(
         self,
@@ -189,11 +191,9 @@ class API:
         None
             If the category was not cached or is outdated.
         """
-        data = await self.cache.get(category_type.value)
-        if data is None:
+        category = await self.cache.get_category(category_type)
+        if category is None:
             return None
-
-        category = models.Category.from_payload(data)
 
         if query and query.strip():
             filtered = self._filter_category_items_for(category.items, query, count)
@@ -252,6 +252,7 @@ class API:
         self,
         category_type: models.CategoryType,
         item_identity: str,
+        cache: bool | None = None,
     ) -> models.CategoryItem:
         """Fetch a category item from the api.
 
@@ -261,7 +262,11 @@ class API:
             The type of category type of the item.
         item_identity : str
             The identity of the item.
+        cache : bool, default True
+            Whether to cache the timetables.
         """
+        if cache is None:
+            cache = True
 
         data = await self._fetch_data(
             f"CategoryTypes/Categories/Filter/{INSTITUTION_IDENTITY}",
@@ -276,13 +281,17 @@ class API:
         )
 
         if not data:
-            raise ValueError("Invalid item ID provided.")
+            raise models.InvalidCodeError(item_identity)
 
-        return models.CategoryItem.from_payload(data[0])
+        item = models.CategoryItem.from_payload(data[0])
+
+        if cache:
+            await self.cache.set_category_item(item)
+
+        return item
 
     async def get_category_item(
         self,
-        category_type: models.CategoryType,
         item_identity: str,
     ) -> models.CategoryItem | None:
         """Get a category item from the cache.
@@ -294,14 +303,7 @@ class API:
         item_identity : str
             The identity of the item.
         """
-        category = await self.get_category(category_type)
-        if not category:
-            return None
-
-        try:
-            return next(filter(lambda i: i.identity == item_identity, category.items))
-        except StopIteration:
-            return None
+        return await self.cache.get_category_item(item_identity)
 
     async def fetch_category_items_timetables(
         self,
@@ -372,17 +374,12 @@ class API:
             timetables.append(timetable)
 
             if cache:
-                await self.cache.set(
-                    f"{category_type.value}.{timetable.identity}",
-                    timetable_data,
-                    expires_in=datetime.timedelta(hours=12),
-                )
+                await self.cache.set_category_item_timetable(timetable)
 
         return timetables
 
     async def get_category_item_timetable(
         self,
-        category_identity: str,
         item_identity: str,
         start: datetime.datetime | None = None,
         end: datetime.datetime | None = None,
@@ -407,11 +404,9 @@ class API:
         None
             If the timetable was not cached or is outdated.
         """
-        data = await self.cache.get(f"{category_identity}.{item_identity}")
-        if data is None:
+        timetable = await self.cache.get_category_item_timetable(item_identity)
+        if timetable is None:
             return None
-
-        timetable = models.CategoryItemTimetable.from_payload(data)
 
         if start or end:
             start, end = utils.calc_start_end_range(start, end)

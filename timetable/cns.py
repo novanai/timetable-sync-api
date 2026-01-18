@@ -1,4 +1,3 @@
-import dataclasses
 import datetime
 import enum
 import typing
@@ -6,11 +5,13 @@ import uuid
 
 import aiohttp
 import icalendar
-import orjson
+import msgspec
 from rapidfuzz import fuzz
 from rapidfuzz import utils as fuzz_utils
 
 from timetable import __version__, utils
+
+SITE = "dcuclubsandsocs.ie"
 
 
 class GroupType(enum.Enum):
@@ -22,8 +23,7 @@ class GroupType(enum.Enum):
     """A society."""
 
 
-@dataclasses.dataclass
-class Event:
+class Event(msgspec.Struct):
     """An event."""
 
     name: str
@@ -47,24 +47,8 @@ class Event:
     description: str
     """The event description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            end=datetime.datetime.fromisoformat(data["end"]),
-            day=data["day"],
-            cost=data["cost"],
-            capacity=data["capacity"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
 
-
-@dataclasses.dataclass
-class Activity:
+class Activity(msgspec.Struct):
     """A weekly activity."""
 
     name: str
@@ -86,23 +70,8 @@ class Activity:
     description: str
     """The activity description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            day=data["day"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            end=datetime.datetime.fromisoformat(data["end"]),
-            capacity=data["capacity"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
 
-
-@dataclasses.dataclass
-class Fixture:
+class Fixture(msgspec.Struct):
     """A fixture."""
 
     name: str
@@ -120,21 +89,6 @@ class Fixture:
     description: str
     """The fixture description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            competition=data["competition"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
-
-
-SITE = "dcuclubsandsocs.ie"
-
 
 class API:
     def __init__(self, cns_address: str) -> None:
@@ -151,29 +105,25 @@ class API:
     async def get_data(self, url: str) -> typing.Any:
         async with self.session.request("GET", f"{self.cns_address}/{url}") as r:
             r.raise_for_status()
-            return await r.json(loads=orjson.loads)
+            return await r.read()
 
     async def fetch_group_events_activities_fixtures(
         self,
         group_type: GroupType,
         identity: str,
     ) -> list[Activity | Event | Fixture]:
-        events = [
-            Event.from_payload(d)
-            for d in await self.get_data(f"{SITE}/{group_type.value}/{identity}/events")
-        ]
-        activities = [
-            Activity.from_payload(d)
-            for d in await self.get_data(
-                f"{SITE}/{group_type.value}/{identity}/activities"
-            )
-        ]
-        fixtures = [
-            Fixture.from_payload(d)
-            for d in await self.get_data(
-                f"{SITE}/{group_type.value}/{identity}/fixtures"
-            )
-        ]
+        events = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/events"),
+            type=list[Event],
+        )
+        activities = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/activities"),
+            type=list[Activity],
+        )
+        fixtures = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/fixtures"),
+            type=list[Fixture],
+        )
 
         return [*events, *activities, *fixtures]
 

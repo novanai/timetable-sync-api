@@ -8,7 +8,7 @@ import re
 import typing
 
 import icalendar
-import orjson
+import msgspec
 
 from timetable import __version__, models
 from timetable.types import is_str_list
@@ -121,7 +121,7 @@ async def resolve_to_category_items(
     for group, cat_codes in original_codes.items():
         for code in cat_codes:
             # code is a category item identity and timetable must be fetched
-            item = await api.get_category_item(group, code)
+            item = await api.get_category_item(code)
             if item:
                 codes[group].append(item)
                 continue
@@ -152,7 +152,7 @@ async def gather_events(
         for identity in identities:
             # timetable is cached
             timetable = await api.get_category_item_timetable(
-                group.value, identity, start=start_date, end=end_date
+                identity, start=start_date, end=end_date
             )
             if timetable:
                 events.extend(timetable.events)
@@ -373,7 +373,7 @@ def generate_json_file(
     events: list[models.Event], display: bool | None = None
 ) -> bytes:
     if not display:
-        return orjson.dumps(events)
+        return msgspec.json.encode(events)
 
     display_data = EventDisplayData.from_events(events)
-    return orjson.dumps([event.to_full_event_dict() for event in display_data])
+    return msgspec.json.encode([event.to_full_event_dict() for event in display_data])

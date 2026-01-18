@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import abc
-import dataclasses
 import datetime
 import enum
 import logging
 import re
 import typing
 
+import msgspec
+
 from timetable import utils
 
 logger = logging.getLogger(__name__)
+
+T = typing.TypeVar("T", bound="PayloadModel")
 
 LOCATION_REGEX = re.compile(
     r"^((?P<campus>[A-Z]{3})\.)?(?P<building>VB|[A-Z][AC-FH-Z]?)(?P<floor>[BG1-9])(?P<room>[0-9\-A-Za-z ()]+)$"
@@ -169,22 +171,22 @@ class ActivityType(DisplayEnum):
     """Assessment."""
 
 
-class ModelBase(abc.ABC):
-    """Base model class."""
+class PayloadModel(typing.Protocol):
+    """Base payload protocol."""
 
     @classmethod
-    @abc.abstractmethod
     def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self: ...
 
+
+class FromPayloadsMixin:
     @classmethod
     def from_payloads(
-        cls, payloads: typing.Sequence[dict[str, typing.Any]]
-    ) -> list[typing.Self]:
+        cls: type[T], payloads: typing.Sequence[dict[str, typing.Any]]
+    ) -> list[T]:
         return [cls.from_payload(p) for p in payloads]
 
 
-@dataclasses.dataclass
-class Category(ModelBase):
+class Category(msgspec.Struct):
     """Information about a category."""
 
     items: list[CategoryItem]
@@ -200,8 +202,7 @@ class Category(ModelBase):
         )
 
 
-@dataclasses.dataclass
-class CategoryItem(ModelBase):
+class CategoryItem(FromPayloadsMixin, msgspec.Struct):
     """An item belonging to a category. This could be a course, module or location."""
 
     description: str | None
@@ -259,8 +260,7 @@ class CategoryItem(ModelBase):
         )
 
 
-@dataclasses.dataclass
-class CategoryItemTimetable(ModelBase):
+class CategoryItemTimetable(msgspec.Struct):
     """A category item's timetable."""
 
     category_type: CategoryType
@@ -289,8 +289,7 @@ class CategoryItemTimetable(ModelBase):
         )
 
 
-@dataclasses.dataclass
-class Event(ModelBase):
+class Event(FromPayloadsMixin, msgspec.Struct):
     """A timetabled event."""
 
     identity: str
@@ -391,8 +390,7 @@ class Event(ModelBase):
         )
 
 
-@dataclasses.dataclass
-class ParsedNameData(ModelBase):
+class ParsedNameData(msgspec.Struct):
     """Data parsed from the event name into proper formats."""
 
     module_codes: list[str]
@@ -471,8 +469,7 @@ class ParsedNameData(ModelBase):
         return matches
 
 
-@dataclasses.dataclass
-class Location(ModelBase):
+class Location(msgspec.Struct):
     """A location."""
 
     campus: str
@@ -571,17 +568,6 @@ RESPONSE_FORMATS: dict[ResponseFormat, str] = {
 }
 
 
-@dataclasses.dataclass
-class APIError:
-    """API error response."""
-
-    status: int
-    """HTTP status code."""
-    message: str
-    """Error message."""
-
-
-@dataclasses.dataclass
 class InvalidCodeError(Exception):
     """Invalid code error."""
 

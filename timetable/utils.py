@@ -230,7 +230,7 @@ class EventDisplayData:
     """The original event for the display data."""
 
     def to_full_event_dict(self) -> dict[str, typing.Any]:
-        data = dataclasses.asdict(self.original_event)
+        data = msgspec.structs.asdict(self.original_event)
         data["display"] = dataclasses.asdict(self)
         data["display"].pop("original_event")
         return data

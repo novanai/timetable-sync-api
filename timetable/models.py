@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import datetime
 import enum
 import logging
@@ -8,7 +9,7 @@ import typing
 
 import msgspec
 
-from timetable import utils
+from timetable import types, utils
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ matches:
 - SPA1035/30[1]OC/L1/01
 """
 
+SEMESTER_CODE = re.compile(r"\[[1|1,2|2|2,3|3|3,1|TM|AY]\]")
+
 EVENT_NAME_SUBSTITUTIONS: dict[str, str] = {
     " ": "",
     "//": "/",
@@ -65,6 +68,8 @@ EVENT_NAME_SUBSTITUTIONS: dict[str, str] = {
     "/]": "/",
     "[/": "/",
 }
+
+FLOOR_ORDER: typing.Final[str] = "BG123456789"
 
 CAMPUSES = {"AHC": "All Hallows", "GLA": "Glasnevin", "SPC": "St Patrick's"}
 
@@ -349,11 +354,7 @@ class Event(FromPayloadsMixin, msgspec.Struct):
     and should therefore not be relied on to provide consistent information.
     """
     name: str
-    """The name of the event.
-
-    If this is in the form `MODULE[SEMESTER]EVENT/ACTIVITY/GROUP` (e.g. `"CSC1003[1]OC/L1/01"`),
-    then `Event.parsed_name_data` will be available.
-    """
+    """The name of the event."""
     event_type: str
     """The activity type, almost always `"On Campus"`, `"Synchronous (Online, live)"`,
     `"Asynchronous (Recorded)"` or `"Booking"`.
@@ -374,58 +375,68 @@ class Event(FromPayloadsMixin, msgspec.Struct):
     """List of week numbers this event takes place on."""
     group_name: str | None
     """The group name, if parsed from either the event name or description."""
-    parsed_name_data: list[ParsedNameData]
-    """Data parsed from the event name into proper formats. May be an empty list (if parsing
-    was unsuccessful).
-    """
+    extras: ExtraEventData
+    """Additional data for public display."""
 
     @classmethod
     def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
-        extra_data: dict[str, typing.Any] = {
-            "module_name": None,
-            "staff_member": None,
-            "weeks": None,
-        }
+        description: str | None = payload["Description"].strip() or None
+        name: str = payload["Name"]
+        event_type: str = payload["EventType"]
+
+        locations = (
+            Location.from_str(loc) if (loc := payload["Location"]) is not None else []
+        )
+
+        module_name: str | None = None
+        staff_member: str | None = None
+        weeks: list[int] | None = None
 
         for item in payload["ExtraProperties"]:
             rank = item["Rank"]
             if rank == 1:
-                extra_data["module_name"] = item["Value"]
+                module_name = item["Value"]
             elif rank == 2:
-                extra_data["staff_member"] = item["Value"]
+                staff_member = item["Value"]
             elif rank == 3:
-                extra_data["weeks"] = utils.parse_weeks(item["Value"])
+                weeks = utils.parse_weeks(item["Value"])
 
-        name: str = payload["Name"].lower().replace(" ", "")
-        description: str = payload["Description"].lower().replace(" ", "")
         group_name: str | None = None
         for grp in ("group", "grp"):
-            for value in (name, description):
+            for value in (payload["Name"], payload["Description"]):
+                value: str = value.lower().replace(" ", "")  # noqa: PLW2901
                 if grp in value and (index := value.index(grp) + len(grp)) < len(value):
                     group_name = value[index].upper()
                     break
+
+        extras = ExtraEventData.from_event(
+            name=name,
+            event_type=event_type,
+            description=description,
+            module_name=module_name,
+            group_name=group_name,
+            locations=locations,
+        )
 
         return cls(
             identity=payload["Identity"],
             start=datetime.datetime.fromisoformat(payload["StartDateTime"]),
             end=datetime.datetime.fromisoformat(payload["EndDateTime"]),
             status_identity=payload["StatusIdentity"],
-            locations=Location.from_str(payload["Location"])
-            if payload["Location"] is not None
-            else None,
-            description=payload["Description"].strip() or None,
-            name=payload["Name"],
-            event_type=payload["EventType"],
+            locations=locations,
+            description=description,
+            name=name,
+            event_type=event_type,
             last_modified=datetime.datetime.fromisoformat(payload["LastModified"]),
-            module_name=extra_data["module_name"],
-            staff_member=extra_data["staff_member"],
-            weeks=extra_data["weeks"],
+            module_name=module_name,
+            staff_member=staff_member,
+            weeks=weeks,
             group_name=group_name,
-            parsed_name_data=ParsedNameData.from_str(payload["Name"]),
+            extras=extras,
         )
 
 
-class ParsedNameData(msgspec.Struct):
+class EventNameData(msgspec.Struct):
     """Data parsed from the event name into proper formats."""
 
     module_codes: list[str]
@@ -443,13 +454,13 @@ class ParsedNameData(msgspec.Struct):
     """The group this event is for. May be `None`."""
 
     @classmethod
-    def from_str(cls, data: str) -> list[ParsedNameData]:
+    def from_str(cls, data: str) -> list[EventNameData]:
         # Some error correction
         data = data.upper()
         for original, substitution in EVENT_NAME_SUBSTITUTIONS.items():
             data = data.replace(original, substitution)
 
-        matches: list[ParsedNameData] = []
+        matches: list[EventNameData] = []
 
         def get_modules(module_str: str) -> list[str]:
             return [module for module in module_str.split("/") if module.strip()]
@@ -541,6 +552,129 @@ class ParsedNameData(msgspec.Struct):
         return matches
 
 
+class ExtraEventData(msgspec.Struct):
+    """Display data for events."""
+
+    event_name_data: list[EventNameData]
+    """Data parsed from the event name into proper formats.
+    May be an empty list (if parsing was unsuccessful).
+    """
+    summary: str
+    """Short summary of this event."""
+    summary_long: str
+    """Long summary of this event."""
+    location: str
+    """Location(s) of this event."""
+    location_long: str
+    """Long Location(s) of this event."""
+    description: str
+    """Description of this event."""
+
+    # TODO: split into sub-methods
+    @classmethod
+    def from_event(
+        cls,
+        name: str,
+        event_type: str,
+        description: str | None,
+        module_name: str | None,
+        group_name: str | None,
+        locations: list[Location],
+    ) -> typing.Self:
+        event_name_data = EventNameData.from_str(name)
+
+        # SUMMARY
+
+        name = re.sub(SEMESTER_CODE, "", n) if (n := module_name) else name
+
+        if description and description.lower().strip() == "lab":
+            activity = "Lab"
+        elif event_name_data:
+            activity = event_name_data[0].activity_type.display
+        else:
+            activity = None
+
+        if activity and group_name:
+            summary_long = f"({activity}, Group {group_name})"
+        elif activity:
+            summary_long = f"({activity})"
+        elif group_name:
+            summary_long = f"(Group {group_name})"
+        else:
+            summary_long = None
+
+        summary_long = utils.title_case(
+            (name + (f" {summary_long}" if summary_long else "")).strip()
+        )
+        summary_short = utils.title_case(name)
+        if group_name:
+            summary_short = f"{summary_short} (Group {group_name})".strip()
+
+        # LOCATIONS
+
+        if locations:
+            # dict[(campus, building)] = [locations]  # noqa: ERA001
+            locations_: dict[tuple[str, str] | None, list[Location]] = (
+                collections.defaultdict(list)
+            )
+
+            for loc in locations:
+                if loc.original is not None:
+                    locations_[None].append(loc)
+                else:
+                    locations_[(loc.campus, loc.building)].append(loc)
+
+            locations_long: list[str] = []
+            locations_short: list[str] = []
+            for main, locs in locations_.items():
+                if main is None:
+                    locs_ = [loc.original for loc in locs]
+                    assert types.is_str_list(locs_)
+                    loc_string = ", ".join(locs_)
+                    locations_long.append(loc_string)
+                    locations_short.append(loc_string)
+                    continue
+
+                campus, building = main
+                building = BUILDINGS[campus].get(building, "[unknown]")
+                campus = CAMPUSES[campus]
+                locs = sorted(locs, key=lambda r: r.room)  # noqa: PLW2901
+                locs = sorted(locs, key=lambda r: FLOOR_ORDER.index(r.floor))  # noqa: PLW2901
+                locations_long.append(
+                    f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))} ({building}, {campus})"
+                )
+                locations_short.append(
+                    f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))}"
+                )
+
+            location_long = ", ".join(locations_long)
+            location_short = ", ".join(locations_short)
+        else:
+            location_long = event_type
+            location_short = event_type
+
+        # DESCRIPTION
+
+        event_type = (
+            data[0].delivery_type.display
+            if (data := event_name_data) and data[0].delivery_type is not None
+            else event_type
+        )
+        if event_type.lower().strip() == "booking":
+            description = f"{description}, {event_type}" if description else event_type
+        else:
+            description = f"{activity}, {event_type}" if activity else event_type
+
+        return cls(
+            event_name_data=event_name_data,
+            summary=summary_short,
+            summary_long=summary_long,
+            location=location_short,
+            location_long=location_long,
+            description=description,
+        )
+
+
 class Location(msgspec.Struct):
     """A location."""
 
@@ -573,7 +707,7 @@ class Location(msgspec.Struct):
             if "&" in loc:
                 campus, rooms = loc.split(".")
                 rooms = [r.strip() for r in rooms.split("&")]
-                locations.extend((f"{campus}.{room}" for room in rooms))
+                locations.extend(f"{campus}.{room}" for room in rooms)
             else:
                 locations.append(loc)
 

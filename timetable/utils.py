@@ -8,10 +8,8 @@ import re
 import typing
 
 import icalendar
-import msgspec
 
 from timetable import __version__, models
-from timetable.types import is_str_list
 
 if typing.TYPE_CHECKING:
     from timetable import api as api_
@@ -19,9 +17,6 @@ if typing.TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-FLOOR_ORDER: typing.Final[str] = "BG123456789"
-# TODO: update semester code
-SEMESTER_CODE = re.compile(r"[\[\(][0-2F,]+[\]\)]")
 
 SMALL_WORDS = re.compile(
     r"\b(a|an|and|at|but|by|de|en|for|if|in|of|on|or|the|to|via|vs?\.?)\b",
@@ -211,136 +206,8 @@ def title_case(text: str) -> str:
     return do_title_case(text)
 
 
-# TODO: rework this to be an optional attribute of the `Event` class
-@dataclasses.dataclass
-class EventDisplayData:
-    """Display data for events."""
-
-    summary: str
-    """Short summary of this event."""
-    summary_long: str
-    """Long summary of this event."""
-    location: str
-    """Long location(s) of this event."""
-    location_long: str
-    """Location(s) of this event."""
-    description: str
-    """Description of this event."""
-    original_event: models.Event
-    """The original event for the display data."""
-
-    def to_full_event_dict(self) -> dict[str, typing.Any]:
-        data = msgspec.structs.asdict(self.original_event)
-        data["display"] = dataclasses.asdict(self)
-        data["display"].pop("original_event")
-        return data
-
-    @classmethod
-    def from_events(cls, events: list[models.Event]) -> list[typing.Self]:
-        return [cls.from_event(event) for event in events]
-
-    @classmethod
-    def from_event(cls, event: models.Event) -> typing.Self:  # noqa: PLR0912, PLR0915
-        # SUMMARY
-
-        name = re.sub(SEMESTER_CODE, "", n) if (n := event.module_name) else event.name
-
-        if event.description and event.description.lower().strip() == "lab":
-            activity = "Lab"
-        elif event.parsed_name_data:
-            activity = event.parsed_name_data[0].activity_type.display
-        else:
-            activity = None
-
-        if activity and event.group_name:
-            summary_long = f"({activity}, Group {event.group_name})"
-        elif activity:
-            summary_long = f"({activity})"
-        elif event.group_name:
-            summary_long = f"(Group {event.group_name})"
-        else:
-            summary_long = None
-
-        summary_long = title_case(
-            (name + (f" {summary_long}" if summary_long else "")).strip()
-        )
-        summary_short = title_case(name)
-        if event.group_name:
-            summary_short = f"{summary_short} (Group {event.group_name})".strip()
-
-        # LOCATIONS
-
-        if event.locations:
-            # dict[(campus, building)] = [locations]  # noqa: ERA001
-            locations: dict[tuple[str, str] | None, list[models.Location]] = (
-                collections.defaultdict(list)
-            )
-
-            for loc in event.locations:
-                if loc.original is not None:
-                    locations[None].append(loc)
-                else:
-                    locations[(loc.campus, loc.building)].append(loc)
-
-            locations_long: list[str] = []
-            locations_short: list[str] = []
-            for main, locs in locations.items():
-                if main is None:
-                    locs_ = [loc.original for loc in locs]
-                    assert is_str_list(locs_)
-                    loc_string = ", ".join(locs_)
-                    locations_long.append(loc_string)
-                    locations_short.append(loc_string)
-                    continue
-
-                campus, building = main
-                building = models.BUILDINGS[campus].get(building, "[unknown]")
-                campus = models.CAMPUSES[campus]
-                locs = sorted(locs, key=lambda r: r.room)  # noqa: PLW2901
-                locs = sorted(locs, key=lambda r: FLOOR_ORDER.index(r.floor))  # noqa: PLW2901
-                locations_long.append(
-                    f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))} ({building}, {campus})"
-                )
-                locations_short.append(
-                    f"{', '.join((f'{loc.building}{loc.floor}{loc.room}' for loc in locs))}"
-                )
-
-            location_long = ", ".join(locations_long)
-            location_short = ", ".join(locations_short)
-        else:
-            location_long = event.event_type
-            location_short = event.event_type
-
-        # DESCRIPTION
-
-        event_type = (
-            data[0].delivery_type.display
-            if (data := event.parsed_name_data) and data[0].delivery_type is not None
-            else event.event_type
-        )
-        if event_type.lower().strip() == "booking":
-            description = (
-                f"{event.description}, {event_type}"
-                if event.description
-                else event_type
-            )
-        else:
-            description = f"{activity}, {event_type}" if activity else event_type
-
-        return cls(
-            summary=summary_short,
-            summary_long=summary_long,
-            location=location_short,
-            location_long=location_long,
-            description=description,
-            original_event=event,
-        )
-
-
 # TODO: rename to 'create'
 def generate_ical_file(events: list[models.Event]) -> bytes:
-    display_data = EventDisplayData.from_events(events)
-
     calendar = icalendar.Calendar()
     calendar.add("METHOD", "PUBLISH")
     calendar.add(
@@ -349,31 +216,20 @@ def generate_ical_file(events: list[models.Event]) -> bytes:
     calendar.add("VERSION", "2.0")
     calendar.add("DTSTAMP", datetime.datetime.now(datetime.timezone.utc))
 
-    for item in display_data:
+    for item in events:
         event = icalendar.Event()
-        event.add("UID", item.original_event.identity)
-        event.add("LAST-MODIFIED", item.original_event.last_modified)
-        event.add("DTSTART", item.original_event.start)
-        event.add("DTEND", item.original_event.end)
-        event.add("DTSTAMP", item.original_event.last_modified)
-        event.add("SUMMARY", item.summary_long)
+        event.add("UID", item.identity)
+        event.add("LAST-MODIFIED", item.last_modified)
+        event.add("DTSTART", item.start)
+        event.add("DTEND", item.end)
+        event.add("DTSTAMP", item.last_modified)
+        event.add("SUMMARY", item.extras.summary_long)
         event.add(
             "DESCRIPTION",
-            f"Details: {item.description}\nStaff: {item.original_event.staff_member}",
+            f"Details: {item.description}\nStaff: {item.staff_member}",
         )
-        event.add("LOCATION", item.location_long)
+        event.add("LOCATION", item.extras.location_long)
         event.add("CLASS", "PUBLIC")
         calendar.add_component(event)
 
     return calendar.to_ical()
-
-
-# TODO: same, rename to 'create'
-def generate_json_file(
-    events: list[models.Event], display: bool | None = None
-) -> bytes:
-    if not display:
-        return msgspec.json.encode(events)
-
-    display_data = EventDisplayData.from_events(events)
-    return msgspec.json.encode([event.to_full_event_dict() for event in display_data])

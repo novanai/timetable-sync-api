@@ -18,23 +18,52 @@ LOCATION_REGEX = re.compile(
     r"^((?P<campus>[A-Z]{3})\.)?(?P<building>VB|[A-Z][AC-FH-Z]?)(?P<floor>[BG1-9])(?P<room>[0-9\-A-Za-z ()]+)$"
 )
 
-# NOTE: this does not match the full inputs below (it takes only the second module and semester)
-# HIS1013[2]HIS1014[2]L1/01
-# HIS1013[2]HIS1014[2]L2/01
-
 EVENT_NAME_REGEX = re.compile(
-    r"(?P<modules>(?:[A-Za-z]+[0-9]+)(?:\/[A-Za-z]+[0-9]+)*)(?:[\[\(]?(?P<semester>(0|1|2|1,2|F))[\]\)]?)(?:(?P<delivery>OC|0C|ASY|AY|AS|SY|HY)\/)?(?P<activity>EX|WS|P|L|T|W|S|E|A)\d{0,2}(?:\/(?P<group>\d+))?"
+    r"(?P<modules_semester>[A-Z]{2,3}\d{4}(?:\/(?:[A-Z]{2,3}\d{4}|\d{2,4}))*(?:\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\][A-Z]{2,3}\d{4})*\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\])(?:(?P<delivery_type>OC|0C|AY|AS|ASY|SY|HY)\/)?(?:(?P<activity_type>[PLTWSE])\d{1,2})[^\/\n]*(?:\/(?P<group_number>\d{2}))?"
 )
+
+MODULES_SEMESTER_VERSION_1 = re.compile(
+    r"^(?P<modules>(?:[A-Z]{2,3}\d{4}\/?)+)\[(?P<semester>1|1,2|2|2,3|3|3,1|TM|AY)\]$"
+)
+"""
+matches:
+- HIS1080/HIS1076[2]
+- HIS1080/HIS1076[2]
+"""
+
+# NOTE: this will do a partial match on version 1, so you MUST match
+# with version 1 first and only use version 2 if there were no matches
+MODULES_SEMESTER_VERSION_2 = re.compile(
+    r"(?P<module>[A-Z]{2,3}\d{4})\[(?P<semester>1|1,2|2|2,3|3|3,1|TM|AY)\]"
+)
+"""
+matches:
+- HIS1013[2]HIS1014[2]
+- HIS1013[2]HIS1014[2]
+"""
+
+MODULES_SEMESTER_VERSION_3 = re.compile(
+    r"^(?P<name>[A-Z]{3})(?P<codes>\d{4}\/(?:\d{4}|\d{2}))\[(?P<semester>1|1,2|2|2,3|3|3,1|TM|AY)\]$"
+)
+"""
+matches:
+- TRA1017/1018[2]OC/L1/01
+- SPA1035/30[1]OC/L1/01
+"""
+
 EVENT_NAME_SUBSTITUTIONS: dict[str, str] = {
     " ": "",
     "//": "/",
+    "(": "[",
+    ")": "]",
+    "{": "[",
+    "}": "]",
     "]/": "]",
-    "/]": "/",
-    "[/": "]",
-    "]]": "]",
-    "])": "]",
+    "][": "]",
     "[[": "[",
-    "}": "",
+    "]]": "]",
+    "/]": "/",
+    "[/": "/",
 }
 
 CAMPUSES = {"AHC": "All Hallows", "GLA": "Glasnevin", "SPC": "St Patrick's"}
@@ -117,12 +146,22 @@ class DisplayEnum(enum.Enum):
 class Semester(DisplayEnum):
     """The semester."""
 
-    ALL_YEAR = 0
-    """All year (both semesters)."""
-    SEMESTER_1 = 1
+    SEMESTER_1 = "1"
     """Semester 1."""
-    SEMESTER_2 = 2
+    SEMESTER_2 = "2"
     """Semester 2."""
+    SEMESTER_3 = "3"
+    """Semester 3."""
+    SEMESTER_1_AND_2 = "1,2"
+    """Semesters 1 and 2."""
+    SEMESTER_1_AND_3 = "1,3"
+    """Semesters 1 and 3."""
+    SEMESTER_2_AND_3 = "2,3"
+    """Semesters 2 and 3."""
+    YEAR_LONG = "AY"
+    """Year Long (Semesters 1, 2 and 3)."""
+    TWELVE_MONTH = "TM"
+    """Twelve Month."""
 
 
 class DeliveryType(DisplayEnum):
@@ -163,12 +202,8 @@ class ActivityType(DisplayEnum):
     """Workshop."""
     SEMINAR = "S"
     """Seminar."""
-    WORKSHOP_SEMINAR = "WS"
-    """Workshop seminar."""
     EXAMINATION = "E"
     """Examination."""
-    ASSESSMENT = "A"
-    """Assessment."""
 
 
 class PayloadModel(typing.Protocol):
@@ -408,16 +443,7 @@ class ParsedNameData(msgspec.Struct):
     """The group this event is for. May be `None`."""
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
-        raise NotImplementedError
-
-    @classmethod
     def from_str(cls, data: str) -> list[ParsedNameData]:
-        # Ignore anything without a `/` as this guarantees it
-        # won't match the regex and speeds up processing
-        if "/" not in data:
-            return []
-
         # Some error correction
         data = data.upper()
         for original, substitution in EVENT_NAME_SUBSTITUTIONS.items():
@@ -425,33 +451,79 @@ class ParsedNameData(msgspec.Struct):
 
         matches: list[ParsedNameData] = []
 
+        def get_modules(module_str: str) -> list[str]:
+            return [module for module in module_str.split("/") if module.strip()]
+
+        def get_module_codes(name: str, codes: list[str]) -> list[str]:
+            base_code = codes[0][:2]
+            modules: list[str] = []
+
+            for code in codes:
+                if len(code) == 2:
+                    modules.append(f"{name}{base_code}{code}")
+                else:
+                    assert len(code) == 4
+                    modules.append(f"{name}{code}")
+
+            return modules
+
+        def get_semester(semester_str: str) -> Semester:
+            return Semester(semester_str)
+
+        def get_delivery_type(deliver_str: str | None) -> DeliveryType | None:
+            if not deliver_str:
+                return None
+
+            if deliver_str == "0C":
+                deliver_str = "OC"
+            elif deliver_str in {"AS", "ASY"}:
+                deliver_str = "AY"
+
+            return DeliveryType(deliver_str)
+
+        def get_activity_type(activity_str: str) -> ActivityType:
+            return ActivityType(activity_str)
+
+        def get_group_number(group_str: str | None) -> int | None:
+            return int(group_str) if group_str else None
+
         for match in EVENT_NAME_REGEX.finditer(data):
-            modules = [
-                module for module in match.group("modules").split("/") if module.strip()
-            ]
+            modules_semester = match.group("modules_semester")
+            delivery_type = get_delivery_type(match.group("delivery_type"))
+            activity_type = get_activity_type(match.group("activity_type"))
+            group_number = get_group_number(match.group("group_number"))
 
-            sem = match.group("semester")
-            if sem in {"1,2", "F"}:
-                sem = "0"
-            semester = Semester(int(sem))
+            modules: list[str] | None = None
+            semester: Semester | None = None
 
-            dt = match.group("delivery")
+            if ms_match := MODULES_SEMESTER_VERSION_1.match(modules_semester):
+                modules = get_modules(ms_match.group("modules"))
+                semester = get_semester(ms_match.group("semester"))
 
-            if dt is not None:
-                if dt == "0C":
-                    dt = "OC"
-                elif dt in {"AS", "ASY"}:
-                    dt = "AY"
-                delivery_type = DeliveryType(dt)
-            else:
-                delivery_type = None
+            elif not ms_match and (
+                ms_match := list(MODULES_SEMESTER_VERSION_2.finditer(modules_semester))
+            ):
+                modules = []
+                semesters: list[str] = []
+                for ms in ms_match:
+                    modules.append(ms.group("module"))
+                    semesters.append(ms.group("semester"))
 
-            at = match.group("activity")
-            if at == "EX":
-                at = "E"
-            activity_type = ActivityType(at)
+                assert (
+                    len(set(semesters)) <= 1
+                )  # semesters should contain a single unique value
+                semester = get_semester(semesters[0])
 
-            group = int(g) if (g := match.group("group")) else None
+            elif not ms_match and (
+                ms_match := MODULES_SEMESTER_VERSION_3.match(modules_semester)
+            ):
+                modules = get_module_codes(
+                    ms_match.group("name"),
+                    ms_match.group("codes").split("/"),
+                )
+                semester = get_semester(ms_match.group("semester"))
+
+            assert modules is not None and semester is not None
 
             matches.append(
                 cls(
@@ -459,7 +531,7 @@ class ParsedNameData(msgspec.Struct):
                     semester=semester,
                     delivery_type=delivery_type,
                     activity_type=activity_type,
-                    group_number=group,
+                    group_number=group_number,
                 )
             )
 
@@ -491,10 +563,6 @@ class Location(msgspec.Struct):
     """The room code. Not guaranteed to be just a number."""
     original: str | None = None
     """The original location code. If `None`, the location was parsed correctly."""
-
-    @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
-        raise NotImplementedError
 
     @classmethod
     def from_str(cls, location: str) -> list[Location]:
@@ -537,35 +605,6 @@ class Location(msgspec.Struct):
             f"{CAMPUSES[self.campus]} ({self.campus})"
             + (f", ({self!s})" if include_original else "")
         )
-
-
-class ResponseFormat(enum.Enum):
-    """The response format."""
-
-    ICAL = "ical"
-    """iCalendar."""
-    JSON = "json"
-    """JSON."""
-    UNKNOWN = "unknown"
-    """Unknown."""
-
-    @classmethod
-    def from_str(cls, format_: str | None) -> typing.Self:
-        format_ = format_.lower() if format_ else "ical"
-        try:
-            return cls(format_)
-        except ValueError:
-            return cls("unknown")
-
-    @property
-    def content_type(self) -> str:
-        return RESPONSE_FORMATS[self]
-
-
-RESPONSE_FORMATS: dict[ResponseFormat, str] = {
-    ResponseFormat.ICAL: "text/calendar",
-    ResponseFormat.JSON: "application/json",
-}
 
 
 class InvalidCodeError(Exception):

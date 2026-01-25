@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import collections
-import dataclasses
 import datetime
 import logging
 import re
@@ -87,29 +86,11 @@ def calc_start_end_range(
     return start, end
 
 
-@dataclasses.dataclass
-class BasicCategoryItem:
-    name: str
-    identity: str
-
-
-async def get_basic_category_items(
-    api: api_.API,
-    category_type: models.CategoryType,
-    query: str | None = None,
-) -> list[BasicCategoryItem]:
-    result = await api.get_category(category_type, query=query)
-    if not result:
-        result = await api.fetch_category(category_type, query=query, cache=True)
-
-    return [BasicCategoryItem(name=c.name, identity=c.identity) for c in result.items]
-
-
 async def resolve_to_category_items(
     original_codes: dict[models.CategoryType, list[str]],
     api: api_.API,
-) -> dict[models.CategoryType, list[models.CategoryItem]]:
-    codes: dict[models.CategoryType, list[models.CategoryItem]] = (
+) -> dict[models.CategoryType, list[models.BasicCategoryItem]]:
+    codes: dict[models.CategoryType, list[models.BasicCategoryItem]] = (
         collections.defaultdict(list)
     )
 
@@ -122,7 +103,9 @@ async def resolve_to_category_items(
                 continue
 
             # code is not a category item, search cached category items for it
-            category = await api.get_category(group, query=code, count=1)
+            category = await api.get_category(
+                group, query=code, limit=1, items_type=models.BasicCategoryItem
+            )
             if not category or not category.items:
                 # could not find category item in cache, fetch it
                 category = await api.fetch_category(group, query=code)
@@ -141,6 +124,9 @@ async def gather_events(
     end_date: datetime.datetime | None,
     api: api_.API,
 ) -> list[models.Event]:
+    timetables_to_fetch: dict[models.CategoryType, list[str]] = collections.defaultdict(
+        list
+    )
     events: list[models.Event] = []
 
     for group, identities in group_identities.items():
@@ -153,15 +139,17 @@ async def gather_events(
                 events.extend(timetable.events)
                 continue
 
-            # TODO: make a group_identities dict and fetch in one request
-            # timetable needs to be fetched
-            timetables = await api.fetch_category_items_timetables(
-                group,
-                [identity],
-                start=start_date,
-                end=end_date,
-            )
-            events.extend(timetables[0].events)
+            timetables_to_fetch[group].append(identity)
+
+    for group, identities in timetables_to_fetch.items():
+        timetables = await api.fetch_category_items_timetables(
+            group,
+            identities,
+            start=start_date,
+            end=end_date,
+        )
+        for timetable in timetables:
+            events.extend(timetable.events)
 
     return events
 

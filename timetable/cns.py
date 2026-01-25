@@ -1,15 +1,14 @@
 import datetime
 import enum
-import typing
 import uuid
 
 import aiohttp
 import icalendar
 import msgspec
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
-from timetable import __version__, utils
+from timetable import __version__
 
 SITE = "dcuclubsandsocs.ie"
 
@@ -90,6 +89,15 @@ class Fixture(msgspec.Struct):
     """The fixture description."""
 
 
+class ClubSoc(msgspec.Struct):
+    """A club or society."""
+
+    id: str
+    """The ID used in the club or society's page URL."""
+    name: str
+    """The club or society name."""
+
+
 class API:
     def __init__(self, cns_address: str) -> None:
         self.cns_address = cns_address
@@ -102,7 +110,7 @@ class API:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    async def get_data(self, url: str) -> typing.Any:
+    async def get_data(self, url: str) -> bytes:
         async with self.session.request("GET", f"{self.cns_address}/{url}") as r:
             r.raise_for_status()
             return await r.read()
@@ -127,36 +135,30 @@ class API:
 
         return [*events, *activities, *fixtures]
 
-    async def fetch_unlocked_groups(
-        self, group_type: GroupType
-    ) -> list[utils.BasicCategoryItem]:
-        return [
-            utils.BasicCategoryItem(name=d["name"], identity=d["id"])
-            for d in await self.get_data(f"{SITE}/{group_type.value}")
-            if not d["is_locked"]
-        ]
-
-    async def fetch_group_info(
-        self, group_type: GroupType, identity: str
-    ) -> utils.BasicCategoryItem:
-        d = await self.get_data(f"{SITE}/{group_type.value}/{identity}")
-        return utils.BasicCategoryItem(name=d["name"], identity=identity)
-
-
-def filter_category_results(
-    categories: list[utils.BasicCategoryItem], query: str
-) -> list[utils.BasicCategoryItem]:
-    results: typing.Iterable[tuple[utils.BasicCategoryItem, float]] = []
-
-    for item in categories:
-        ratio = fuzz.partial_ratio(
-            query, item.name, processor=fuzz_utils.default_process
+    async def fetch_group_items(self, group_type: GroupType) -> list[ClubSoc]:
+        return msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}"),
+            type=list[ClubSoc],
         )
-        results.append((item, ratio))
 
-    results = filter(lambda r: r[1] > 80, results)
-    results = sorted(results, key=lambda r: r[1], reverse=True)
-    return [r[0] for r in results]
+    async def fetch_item(self, group_type: GroupType, identity: str) -> ClubSoc:
+        return msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}"), type=ClubSoc
+        )
+
+
+def filter_group_items(items: list[ClubSoc], query: str) -> list[ClubSoc]:
+    names = [item.name for item in items]
+
+    matches = process.extract(
+        query,
+        names,
+        scorer=fuzz.partial_ratio,
+        processor=fuzz_utils.default_process,
+        score_cutoff=80,
+    )
+
+    return [items[idx] for _, _, idx in matches]
 
 
 def generate_ical_file(events: dict[str, list[Event | Activity | Fixture]]) -> bytes:

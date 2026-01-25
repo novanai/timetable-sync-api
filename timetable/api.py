@@ -5,7 +5,7 @@ import typing
 
 import aiohttp
 import msgspec
-from rapidfuzz import fuzz
+from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
 from timetable import __version__, models, utils
@@ -93,7 +93,7 @@ class API:
         *,
         query: str | None = None,
         cache: bool | None = None,
-    ) -> models.Category:
+    ) -> models.Category[models.CategoryItem]:
         """Fetch a category.
 
         Parameters
@@ -155,7 +155,7 @@ class API:
                 results.extend(d["Results"])
 
         final_data = {"Results": results, "Count": count}
-        category = models.Category.from_payload(final_data)
+        category = models.Category[models.CategoryItem].from_payload(final_data)
 
         if (query is None or not query.strip()) and cache:
             await self.cache.set_category(
@@ -170,8 +170,9 @@ class API:
         category_type: models.CategoryType,
         *,
         query: str | None = None,
-        count: int | None = None,
-    ) -> models.Category | None:
+        limit: int | None = None,
+        items_type: type[models.CategoryItemT],
+    ) -> models.Category[models.CategoryItemT] | None:
         """Get a category from the cache.
 
         Parameters
@@ -180,7 +181,7 @@ class API:
             The category type.
         query : str | None, default None
             A full or partial course, module or location code to search for.
-        count : int | None, default None
+        limit : int | None, default None
             The maximum number of category items to include when searching for `query`. If `None` will
             include all matching items. Ignored if no query is provided.
 
@@ -191,12 +192,12 @@ class API:
         None
             If the category was not cached or is outdated.
         """
-        category = await self.cache.get_category(category_type)
+        category = await self.cache.get_category(category_type, items_type)
         if category is None:
             return None
 
         if query and query.strip():
-            filtered = self._filter_category_items_for(category.items, query, count)
+            filtered = self._filter_category_items_for(category.items, query, limit)
             return models.Category(
                 filtered,
                 len(filtered),
@@ -206,47 +207,40 @@ class API:
 
     def _filter_category_items_for(
         self,
-        category_items: list[models.CategoryItem],
+        category_items: list[models.CategoryItemT],
         query: str,
-        count: int | None,
-    ) -> list[models.CategoryItem]:
+        limit: int | None,
+    ) -> list[models.CategoryItemT]:
         """Filter category items for `query`, only returning items with a >80% match.
 
         Parameters
         ----------
-        category_items : list[models.CategoryItem]
+        category_items : list[models.CategoryItemT]
             The category items to filter.
         query : str
             The query to filter for. Checks against the category's name and code.
-        count : int | None
+        limit : int | None
             The maximum number of category items to include when searching for `query`.
             If `None` will include all matching items.
 
         Returns
         -------
-        list[models.CategoryItem]
+        list[models.CategoryItemT]
             The items which matched the search query with a >80% match,
             sorted from highest match to lowest.
         """
-        count = count if count is not None else len(category_items)
-        results: typing.Iterable[tuple[models.CategoryItem, float]] = []
+        names = [item.name for item in category_items]
 
-        for item in category_items:
-            # NOTE: `item.description` is not used in the filtering because it does not provide
-            # enough unique information that cannot be provided by `name` or `code`
-            item_ratios = [
-                fuzz.partial_ratio(
-                    query, item.name, processor=fuzz_utils.default_process
-                ),
-                fuzz.partial_ratio(
-                    query, item.code, processor=fuzz_utils.default_process
-                ),
-            ]
-            results.append((item, max(item_ratios)))
+        matches = process.extract(
+            query,
+            names,
+            scorer=fuzz.partial_ratio,
+            processor=fuzz_utils.default_process,
+            limit=limit,
+            score_cutoff=80,
+        )
 
-        results = filter(lambda r: r[1] > 85, results)
-        results = sorted(results, key=lambda r: r[1], reverse=True)
-        return [r[0] for r in results[:count]]
+        return [category_items[idx] for _, _, idx in matches]
 
     async def fetch_category_item(
         self,

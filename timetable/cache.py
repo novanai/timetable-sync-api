@@ -12,7 +12,7 @@ from glide import (
 
 from timetable import models
 
-T = typing.TypeVar("T", bound=models.PayloadModel)
+T = typing.TypeVar("T", bound=msgspec.Struct)
 
 
 class ValkeyCache:
@@ -43,7 +43,7 @@ class ValkeyCache:
             A unique identifier of the data being cached.
         model : models.PayloadModel
             The data model to cache.
-        expires_in : datetime.timedelta | None, default None
+        expires_in : datetime.timedelta | None, default: 1 day
             The time this data will expire in.
         """
         if expires_in is None:
@@ -77,14 +77,18 @@ class ValkeyCache:
         )
 
     async def set_category(
-        self, category_type: models.CategoryType, category: models.Category
+        self,
+        category_type: models.CategoryType,
+        category: models.Category[models.CategoryItem],
     ) -> None:
         await self._set(f"category:{category_type.value}", category)
 
     async def get_category(
-        self, category_type: models.CategoryType
-    ) -> models.Category | None:
-        return await self._get(f"category:{category_type.value}", models.Category)
+        self, category_type: models.CategoryType, model_type: type[models.CategoryItemT]
+    ) -> models.Category[models.CategoryItemT] | None:
+        return await self._get(
+            f"category:{category_type.value}", models.Category[model_type]
+        )
 
     async def set_category_item(self, item: models.CategoryItem) -> None:
         await self._set(f"item:{item.identity}", item)

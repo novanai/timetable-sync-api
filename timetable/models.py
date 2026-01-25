@@ -5,7 +5,7 @@ import datetime
 import enum
 import logging
 import re
-import typing
+import typing as t
 
 import msgspec
 
@@ -13,14 +13,16 @@ from timetable import types, utils
 
 logger = logging.getLogger(__name__)
 
-T = typing.TypeVar("T", bound="PayloadModel")
+T = t.TypeVar("T", bound="PayloadModel")
+CategoryItemT = t.TypeVar("CategoryItemT", bound="BasicCategoryItem")
 
 LOCATION_REGEX = re.compile(
     r"^((?P<campus>[A-Z]{3})\.)?(?P<building>VB|[A-Z][AC-FH-Z]?)(?P<floor>[BG1-9])(?P<room>[0-9\-A-Za-z ()]+)$"
 )
 
 EVENT_NAME_REGEX = re.compile(
-    r"(?P<modules_semester>[A-Z]{2,3}\d{4}(?:\/(?:[A-Z]{2,3}\d{4}|\d{2,4}))*(?:\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\][A-Z]{2,3}\d{4})*\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\])(?:(?P<delivery_type>OC|0C|AY|AS|ASY|SY|HY)\/)?(?:(?P<activity_type>[PLTWSE])\d{1,2})[^\/\n]*(?:\/(?P<group_number>\d{2}))?"
+    r"(?P<modules_semester>[A-Z]{2,3}\d{4}(?:\/(?:[A-Z]{2,3}\d{4}|\d{2,4}))*(?:\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\][A-Z]{2,3}\d{4})*\[(?:1|1,2|2|2,3|3|3,1|TM|AY)\])"
+    r"(?:(?P<delivery_type>OC|0C|AY|AS|ASY|SY|HY)\/)?(?:(?P<activity_type>[PLTWSE])\d{1,2})[^\/\n]*(?:\/(?P<group_number>\d{2}))?"
 )
 
 MODULES_SEMESTER_VERSION_1 = re.compile(
@@ -69,7 +71,7 @@ EVENT_NAME_SUBSTITUTIONS: dict[str, str] = {
     "[/": "/",
 }
 
-FLOOR_ORDER: typing.Final[str] = "BG123456789"
+FLOOR_ORDER: t.Final[str] = "BG123456789"
 
 CAMPUSES = {"AHC": "All Hallows", "GLA": "Glasnevin", "SPC": "St Patrick's"}
 
@@ -211,38 +213,52 @@ class ActivityType(DisplayEnum):
     """Examination."""
 
 
-class PayloadModel(typing.Protocol):
+class PayloadModel(t.Protocol):
     """Base payload protocol."""
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self: ...
+    def from_payload(cls, payload: dict[str, t.Any]) -> t.Self: ...
 
 
 class FromPayloadsMixin:
     @classmethod
-    def from_payloads(
-        cls: type[T], payloads: typing.Sequence[dict[str, typing.Any]]
-    ) -> list[T]:
+    def from_payloads(cls: type[T], payloads: list[dict[str, t.Any]]) -> list[T]:
         return [cls.from_payload(p) for p in payloads]
 
 
-class Category(msgspec.Struct):
+class Category(msgspec.Struct, t.Generic[CategoryItemT]):
     """Information about a category."""
 
-    items: list[CategoryItem]
+    items: list[CategoryItemT]
     """The category items."""
     count: int
     """The number of items in this category."""
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
+    def from_payload(
+        cls: type[Category[CategoryItem]], payload: dict[str, t.Any]
+    ) -> Category[CategoryItem]:
         return cls(
             items=CategoryItem.from_payloads(payload["Results"]),
             count=payload["Count"],
         )
 
 
-class CategoryItem(FromPayloadsMixin, msgspec.Struct):
+class BasicCategoryItem(msgspec.Struct):
+    name: str
+    """- For courses, this is the course code.
+    - For modules, this is the full module name, including the code, semester and full title.
+    - For locations, this is the location's code, which can be parsed by `Location.from_str`
+    ### Examples:
+    - Courses: `"COMSCI1"`
+    - Modules: `"CSC1003[1] Computer Programming I"`
+    - Locations: `"GLA.C117 & C122"`
+    """
+    identity: str
+    """Unique identity of this category item."""
+
+
+class CategoryItem(BasicCategoryItem, FromPayloadsMixin, msgspec.Struct):
     """An item belonging to a category. This could be a course, module or location."""
 
     description: str | None
@@ -259,17 +275,6 @@ class CategoryItem(FromPayloadsMixin, msgspec.Struct):
     """The type of category this item belongs to."""
     parent_categories: list[str]
     """Unique identities of the faculty(s) this item belongs to."""
-    identity: str
-    """Unique identity of this category item."""
-    name: str
-    """- For courses, this is the course code.
-    - For modules, this is the full module name, including the code, semester and full title.
-    - For locations, this is the location's code, which can be parsed by `Location.from_str`
-    ### Examples:
-    - Courses: `"COMSCI1"`
-    - Modules: `"CSC1003[1] Computer Programming I"`
-    - Locations: `"GLA.C117 & C122"`
-    """
     code: str
     """The course, module or location code(s).
     If this is for a location, it may contain multiple codes separated by a space.
@@ -280,7 +285,7 @@ class CategoryItem(FromPayloadsMixin, msgspec.Struct):
     """
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
+    def from_payload(cls, payload: dict[str, t.Any]) -> t.Self:
         cat_type = CategoryType(payload["CategoryTypeIdentity"])
         name: str = payload["Name"]
 
@@ -320,7 +325,7 @@ class CategoryItemTimetable(msgspec.Struct):
     """Events on this timetable."""
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
+    def from_payload(cls, payload: dict[str, t.Any]) -> t.Self:
         return cls(
             category_type=payload["CategoryTypeIdentity"],
             identity=payload["Identity"],
@@ -379,7 +384,7 @@ class Event(FromPayloadsMixin, msgspec.Struct):
     """Additional data for public display."""
 
     @classmethod
-    def from_payload(cls, payload: dict[str, typing.Any]) -> typing.Self:
+    def from_payload(cls, payload: dict[str, t.Any]) -> t.Self:
         description: str | None = payload["Description"].strip() or None
         name: str = payload["Name"]
         event_type: str = payload["EventType"]
@@ -580,7 +585,7 @@ class ExtraEventData(msgspec.Struct):
         module_name: str | None,
         group_name: str | None,
         locations: list[Location],
-    ) -> typing.Self:
+    ) -> t.Self:
         event_name_data = EventNameData.from_str(name)
 
         # SUMMARY

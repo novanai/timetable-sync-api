@@ -93,7 +93,8 @@ class API:
         *,
         query: str | None = None,
         cache: bool | None = None,
-    ) -> models.Category[models.CategoryItem]:
+        items_type: type[models.CategoryItemT],
+    ) -> models.Category[models.CategoryItemT]:
         """Fetch a category.
 
         Parameters
@@ -104,6 +105,8 @@ class API:
             A full or partial course, module or location code to search for.
         cache : bool, default True
             Whether to cache the category.
+        items_type: type[BasicCategoryItem] | type [CategoryItem]
+            The item type to return with the category.
 
         Returns
         -------
@@ -163,7 +166,18 @@ class API:
                 category,
             )
 
-        return category
+        # NOTE: pyright complains about this because of the way I manually set
+        # the item type but don't worry - it is correct and pyright can shut up
+        if items_type is models.BasicCategoryItem:
+            return models.Category(  # pyright: ignore[reportReturnType]
+                items=[
+                    models.BasicCategoryItem(name=item.name, identity=item.identity)
+                    for item in category.items
+                ],
+                count=category.count,
+            )
+
+        return category  # pyright: ignore[reportReturnType]
 
     async def get_category(
         self,
@@ -184,6 +198,8 @@ class API:
         limit : int | None, default None
             The maximum number of category items to include when searching for `query`. If `None` will
             include all matching items. Ignored if no query is provided.
+        items_type: type[BasicCategoryItem] | type [CategoryItem]
+            The item type to return with the category.
 
         Returns
         -------

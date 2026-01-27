@@ -9,7 +9,9 @@ from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
 from timetable import __version__, models, utils
-from timetable import cache as cache_
+
+if typing.TYPE_CHECKING:
+    from timetable import cache as cache_
 
 logger = logging.getLogger(__name__)
 
@@ -18,17 +20,12 @@ INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
 
 class API:
-    def __init__(self, valkey_client: cache_.ValkeyCache) -> None:
+    def __init__(self, valkey_client: "cache_.ValkeyCache") -> None:
         self._cache = valkey_client
         self._session: aiohttp.ClientSession | None = None
 
-    @classmethod
-    async def create(cls, valkey_host: str, valkey_port: int) -> typing.Self:
-        valkey_client = await cache_.ValkeyCache.create(valkey_host, valkey_port)
-        return cls(valkey_client)
-
     @property
-    def cache(self) -> cache_.ValkeyCache:
+    def cache(self) -> "cache_.ValkeyCache":
         """The Valkey client to use for caching."""
         return self._cache
 

@@ -10,7 +10,9 @@ from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
 from timetable import __version__
-from timetable import cache as cache_
+
+if typing.TYPE_CHECKING:
+    from timetable import cache as cache_
 
 SITE = "dcuclubsandsocs.ie"
 
@@ -101,20 +103,13 @@ class ClubSoc(msgspec.Struct):
 
 
 class API:
-    def __init__(self, cns_address: str, valkey_client: cache_.ValkeyCache) -> None:
+    def __init__(self, cns_address: str, valkey_client: "cache_.ValkeyCache") -> None:
         self.cns_address = cns_address
         self._cache = valkey_client
         self._session: aiohttp.ClientSession | None = None
 
-    @classmethod
-    async def create(
-        cls, cns_address: str, valkey_host: str, valkey_port: int
-    ) -> typing.Self:
-        valkey_client = await cache_.ValkeyCache.create(valkey_host, valkey_port)
-        return cls(cns_address, valkey_client)
-
     @property
-    def cache(self) -> cache_.ValkeyCache:
+    def cache(self) -> "cache_.ValkeyCache":
         """The Valkey client to use for caching."""
         return self._cache
 

@@ -10,7 +10,7 @@ from glide import (
     NodeAddress,
 )
 
-from timetable import models
+from timetable import cns, models
 
 T = typing.TypeVar("T", bound=msgspec.Struct)
 
@@ -32,7 +32,7 @@ class ValkeyCache:
     async def _set(
         self,
         key: str,
-        model: models.PayloadModel,
+        model: T | list[T],
         expires_in: datetime.timedelta | None = None,
     ) -> None:
         """Cache `data` under `key`.
@@ -41,7 +41,7 @@ class ValkeyCache:
         ----------
         key : str
             A unique identifier of the data being cached.
-        model : models.PayloadModel
+        model : msgspec.Struct
             The data model to cache.
         expires_in : datetime.timedelta | None, default: 1 day
             The time this data will expire in.
@@ -55,7 +55,15 @@ class ValkeyCache:
             expiry=ExpirySet(ExpiryType.SEC, expires_in),
         )
 
-    async def _get(self, key: str, model_type: type[T]) -> T | None:
+    @typing.overload
+    async def _get(self, key: str, model_type: type[T]) -> T | None: ...
+
+    @typing.overload
+    async def _get(self, key: str, model_type: type[list[T]]) -> list[T] | None: ...
+
+    async def _get(
+        self, key: str, model_type: type[T] | type[list[T]]
+    ) -> T | list[T] | None:
         """Get data stored under `key` from the cache.
 
         Parameters
@@ -109,3 +117,35 @@ class ValkeyCache:
         self, item_id: str
     ) -> models.CategoryItemTimetable | None:
         return await self._get(f"timetable:{item_id}", models.CategoryItemTimetable)
+
+    async def set_cns_group_items(
+        self, group_type: cns.GroupType, group_items: list[cns.ClubSoc]
+    ) -> None:
+        await self._set(
+            f"cns:{group_type.value}",
+            group_items,
+        )
+
+    async def get_cns_group_items(
+        self, group_type: cns.GroupType
+    ) -> list[cns.ClubSoc] | None:
+        return await self._get(
+            f"cns:{group_type.value}",
+            list[cns.ClubSoc],
+        )
+
+    async def set_cns_item_events(
+        self, identity: str, events: list[cns.Activity | cns.Event | cns.Fixture]
+    ) -> None:
+        await self._set(
+            f"events:{identity}",
+            events,
+        )
+
+    async def get_cns_item_events(
+        self, identity: str
+    ) -> list[cns.Activity | cns.Event | cns.Fixture] | None:
+        return await self._get(
+            f"events:{identity}",
+            list[cns.Activity | cns.Event | cns.Fixture],
+        )

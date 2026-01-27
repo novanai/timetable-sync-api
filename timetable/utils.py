@@ -108,7 +108,9 @@ async def resolve_to_category_items(
             )
             if not category or not category.items:
                 # could not find category item in cache, fetch it
-                category = await api.fetch_category(group, query=code)
+                category = await api.fetch_category(
+                    group, query=code, items_type=models.BasicCategoryItem
+                )
                 if not category.items:
                     raise models.InvalidCodeError(code)
 

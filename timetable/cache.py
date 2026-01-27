@@ -134,6 +134,18 @@ class ValkeyCache:
             list[cns.ClubSoc],
         )
 
+    async def set_cns_group_item(self, item: cns.ClubSoc) -> None:
+        await self._set(f"cns:item:{item.id}", item)
+
+    async def get_cns_group_item(
+        self,
+        identity: str,
+    ) -> cns.ClubSoc | None:
+        return await self._get(
+            f"cns:item:{identity}",
+            cns.ClubSoc,
+        )
+
     async def set_cns_item_events(
         self, identity: str, events: list[cns.Activity | cns.Event | cns.Fixture]
     ) -> None:

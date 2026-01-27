@@ -189,9 +189,16 @@ class API:
         return items
 
     async def fetch_item(self, group_type: GroupType, identity: str) -> ClubSoc:
-        return msgspec.json.decode(
+        item = msgspec.json.decode(
             await self.get_data(f"{SITE}/{group_type.value}/{identity}"), type=ClubSoc
         )
+
+        await self.cache.set_cns_group_item(item)
+
+        return item
+
+    async def get_item(self, identity: str) -> ClubSoc | None:
+        return await self.cache.get_cns_group_item(identity)
 
     def _filter_group_items(self, items: list[ClubSoc], query: str) -> list[ClubSoc]:
         names = [item.name for item in items]

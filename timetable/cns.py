@@ -83,7 +83,7 @@ class Fixture(msgspec.Struct):
     """The fixture poster."""
     start: datetime.datetime
     """The fixture's start time."""
-    competition: str
+    competition: str | None
     """The fixture competition."""
     type: str
     """The fixture type. Usually `HOME` or `AWAY`."""

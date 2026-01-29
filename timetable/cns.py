@@ -26,7 +26,7 @@ class GroupType(enum.Enum):
     """A society."""
 
 
-class Event(msgspec.Struct):
+class Event(msgspec.Struct, tag=True, tag_field="struct_type"):
     """An event."""
 
     name: str
@@ -51,7 +51,7 @@ class Event(msgspec.Struct):
     """The event description."""
 
 
-class Activity(msgspec.Struct):
+class Activity(msgspec.Struct, tag=True, tag_field="struct_type"):
     """A weekly activity."""
 
     name: str
@@ -74,7 +74,7 @@ class Activity(msgspec.Struct):
     """The activity description."""
 
 
-class Fixture(msgspec.Struct):
+class Fixture(msgspec.Struct, tag=True, tag_field="struct_type"):
     """A fixture."""
 
     name: str

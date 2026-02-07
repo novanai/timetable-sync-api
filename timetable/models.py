@@ -293,7 +293,7 @@ class CategoryItem(BasicCategoryItem, FromPayloadsMixin, msgspec.Struct):
             locations = Location.from_str(name)
             code = " ".join([str(loc) for loc in locations])
         else:
-            code = name.split(" ")[0]
+            code = name.split(" ", maxsplit=1)[0]
 
         return cls(
             description=payload["Description"].strip() or None,

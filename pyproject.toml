@@ -19,11 +19,10 @@ Repository = "https://github.com/novanai/timetable-sync-api"
 
 [dependency-groups]
 dev = [
-    "pyright>=1.1.407",
-    "ruff>=0.14.14",
+    "pyright>=1.1.408",
+    "ruff>=0.15.0",
     "types-icalendar>=6.3.2.20251222",
-    "types-redis>=4.6.0.20241004",
-    "uv>=0.9.26",
+    "uv>=0.10.0",
 ]
 nox = [
     "nox>=2025.11.12",
@@ -74,7 +73,7 @@ ignore = [
 convention = "numpy"
 
 [tool.uv]
-required-version = "~=0.9"
+required-version = "~=0.10"
 
 [tool.pyright]
 pythonVersion = "3.13"

@@ -6,8 +6,6 @@ import logging
 import re
 import typing
 
-import icalendar
-
 from timetable import __version__, models
 
 if typing.TYPE_CHECKING:
@@ -196,30 +194,45 @@ def title_case(text: str) -> str:
     return do_title_case(text)
 
 
-# TODO: rename to 'create'
-def generate_ical_file(events: list[models.Event]) -> bytes:
-    calendar = icalendar.Calendar()
-    calendar.add("METHOD", "PUBLISH")
-    calendar.add(
-        "PRODID", f"-//timetable.redbrick.dcu.ie//TimetableSync {__version__}//EN"
-    )
-    calendar.add("VERSION", "2.0")
-    calendar.add("DTSTAMP", datetime.datetime.now(datetime.timezone.utc))
+def to_ics_file(events: list[models.Event]) -> bytes:
+    def format_datetime(dt: datetime.datetime) -> str:
+        """Format datetime for ics format. This assumes the datetime is in UTC."""
+        return dt.strftime("%Y%m%dT%H%M%SZ")
+
+    def format_text(text: str) -> str:
+        """Format text for ics format."""
+        return (
+            text.replace(r"\N", "\n")
+            .replace("\\", "\\\\")
+            .replace(";", r"\;")
+            .replace(",", r"\,")
+            .replace("\r\n", r"\n")
+            .replace("\n", r"\n")
+        )
+
+    parts: list[str] = [
+        "BEGIN:VCALENDAR\n",
+        "VERSION:2.0\n",
+        "METHOD:PUBLISH\n",
+        f"PRODID:-//timetable.redbrick.dcu.ie//TimetableSync {__version__}//EN\n",
+        f"DTSTAMP:{format_datetime(datetime.datetime.now(datetime.timezone.utc))}\n",
+    ]
 
     for item in events:
-        event = icalendar.Event()
-        event.add("UID", item.identity)
-        event.add("LAST-MODIFIED", item.last_modified)
-        event.add("DTSTART", item.start)
-        event.add("DTEND", item.end)
-        event.add("DTSTAMP", item.last_modified)
-        event.add("SUMMARY", item.extras.summary_long)
-        event.add(
-            "DESCRIPTION",
-            f"Details: {item.description}\nStaff: {item.staff_member}",
+        parts.append(
+            "BEGIN:VEVENT\n"
+            f"UID:{item.identity}\n"
+            f"DTSTAMP:{format_datetime(item.last_modified)}\n"
+            f"LAST-MODIFIED:{format_datetime(item.last_modified)}\n"
+            f"DTSTART:{format_datetime(item.start)}\n"
+            f"DTEND:{format_datetime(item.end)}\n"
+            f"SUMMARY:{format_text(item.extras.summary_long)}\n"
+            f"DESCRIPTION:{format_text(f'Details: {item.description or ""}\nStaff: {item.staff_member or ""}')}\n"
+            f"LOCATION:{format_text(item.extras.location_long)}\n"
+            "CLASS:PUBLIC\n"
+            "END:VEVENT\n"
         )
-        event.add("LOCATION", item.extras.location_long)
-        event.add("CLASS", "PUBLIC")
-        calendar.add_component(event)
 
-    return calendar.to_ical()
+    parts.append("END:VCALENDAR\n")
+
+    return "".join(parts).encode("utf-8")

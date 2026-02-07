@@ -241,7 +241,7 @@ def to_ics_file(events: list[models.Event]) -> bytes:
             f"DTSTART:{format_datetime(item.start)}\n"
             f"DTEND:{format_datetime(item.end)}\n"
             f"SUMMARY:{format_text(item.extras.summary_long)}\n"
-            f"DESCRIPTION:{format_text(f'Details: {item.description or ""}\nStaff: {item.staff_member or ""}')}\n"
+            f"DESCRIPTION:{format_text(f'Details: {item.description or "[unkown]"}\nStaff: {item.staff_member or "[unkown]"}')}\n"
             f"LOCATION:{format_text(item.extras.location_long)}\n"
             "CLASS:PUBLIC\n"
             "END:VEVENT\n"

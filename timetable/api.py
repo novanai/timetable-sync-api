@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://scientia-eu-v4-api-d1-03.azurewebsites.net/api/Public"
 INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
+# TODO: use uuid's for all identities
 
 class API:
     def __init__(self, valkey_client: "cache_.ValkeyCache") -> None:

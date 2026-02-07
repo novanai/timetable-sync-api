@@ -5,6 +5,7 @@ import datetime
 import logging
 import re
 import typing
+import uuid
 
 from timetable import __version__, models
 
@@ -88,31 +89,44 @@ async def resolve_to_category_items(
     original_codes: dict[models.CategoryType, list[str]],
     api: api_.API,
 ) -> dict[models.CategoryType, list[models.BasicCategoryItem]]:
+    async def resolve_from_uuid(
+        category_type: models.CategoryType, item_id: uuid.UUID
+    ) -> models.BasicCategoryItem:
+        return await api.get_category_item(
+            str(item_id)
+        ) or await api.fetch_category_item(category_type, str(item_id))
+
+    async def resolve_from_code(
+        category_type: models.CategoryType, code: str
+    ) -> models.BasicCategoryItem | None:
+        # try from cache
+        category = await api.get_category(
+            category_type, query=code, limit=1, items_type=models.BasicCategoryItem
+        )
+        if category and category.items:
+            return category.items[0]
+
+        # fallback to fetch
+        category = await api.fetch_category(
+            category_type, query=code, items_type=models.BasicCategoryItem
+        )
+        if category.items:
+            return category.items[0]
+
     codes: dict[models.CategoryType, list[models.BasicCategoryItem]] = (
         collections.defaultdict(list)
     )
 
     for group, cat_codes in original_codes.items():
         for code in cat_codes:
-            # code is a category item identity and timetable must be fetched
-            item = await api.get_category_item(code)
-            if item:
-                codes[group].append(item)
-                continue
-
-            # code is not a category item, search cached category items for it
-            category = await api.get_category(
-                group, query=code, limit=1, items_type=models.BasicCategoryItem
-            )
-            if not category or not category.items:
-                # could not find category item in cache, fetch it
-                category = await api.fetch_category(
-                    group, query=code, items_type=models.BasicCategoryItem
-                )
-                if not category.items:
+            try:
+                item_id = uuid.UUID(code)
+                item = await resolve_from_uuid(group, item_id)
+            except ValueError:
+                item = await resolve_from_code(group, code)
+                if not item:
                     raise models.InvalidCodeError(code)
 
-            item = category.items[0]
             codes[group].append(item)
 
     return codes

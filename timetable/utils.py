@@ -5,7 +5,7 @@ import datetime
 import logging
 import re
 import typing
-import uuid
+from uuid import UUID
 
 from timetable import __version__, models
 
@@ -80,7 +80,7 @@ def calc_start_end_range(
 
     # TODO: set end to start + 1 week if end before start
     if start > end:
-        raise ValueError("Start date/time cannot be later than end date/time")
+        raise ValueError("Start datetime cannot be later than end datetime")
 
     return start, end
 
@@ -90,11 +90,11 @@ async def resolve_to_category_items(
     api: api_.API,
 ) -> dict[models.CategoryType, list[models.BasicCategoryItem]]:
     async def resolve_from_uuid(
-        category_type: models.CategoryType, item_id: uuid.UUID
+        category_type: models.CategoryType, item_id: UUID
     ) -> models.BasicCategoryItem:
-        return await api.get_category_item(
-            str(item_id)
-        ) or await api.fetch_category_item(category_type, str(item_id))
+        return await api.get_category_item(item_id) or await api.fetch_category_item(
+            category_type, item_id
+        )
 
     async def resolve_from_code(
         category_type: models.CategoryType, code: str
@@ -113,6 +113,8 @@ async def resolve_to_category_items(
         if category.items:
             return category.items[0]
 
+        return None
+
     codes: dict[models.CategoryType, list[models.BasicCategoryItem]] = (
         collections.defaultdict(list)
     )
@@ -120,7 +122,7 @@ async def resolve_to_category_items(
     for group, cat_codes in original_codes.items():
         for code in cat_codes:
             try:
-                item_id = uuid.UUID(code)
+                item_id = UUID(code)
                 item = await resolve_from_uuid(group, item_id)
             except ValueError:
                 item = await resolve_from_code(group, code)
@@ -133,13 +135,13 @@ async def resolve_to_category_items(
 
 
 async def gather_events(
-    group_identities: dict[models.CategoryType, list[str]],
+    group_identities: dict[models.CategoryType, list[UUID]],
     start_date: datetime.datetime | None,
     end_date: datetime.datetime | None,
     api: api_.API,
 ) -> list[models.Event]:
-    timetables_to_fetch: dict[models.CategoryType, list[str]] = collections.defaultdict(
-        list
+    timetables_to_fetch: dict[models.CategoryType, list[UUID]] = (
+        collections.defaultdict(list)
     )
     events: list[models.Event] = []
 
@@ -241,7 +243,7 @@ def to_ics_file(events: list[models.Event]) -> bytes:
             f"DTSTART:{format_datetime(item.start)}\n"
             f"DTEND:{format_datetime(item.end)}\n"
             f"SUMMARY:{format_text(item.extras.summary_long)}\n"
-            f"DESCRIPTION:{format_text(f'Details: {item.description or "[unkown]"}\nStaff: {item.staff_member or "[unkown]"}')}\n"
+            f"DESCRIPTION:{format_text(f'Details: {item.description or "[unknown]"}\nStaff: {item.staff_member or "[unknown]"}')}\n"
             f"LOCATION:{format_text(item.extras.location_long)}\n"
             "CLASS:PUBLIC\n"
             "END:VEVENT\n"

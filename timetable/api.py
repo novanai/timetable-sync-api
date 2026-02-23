@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import logging
 import typing
+from uuid import UUID
 
 import aiohttp
 import msgspec
@@ -18,7 +19,10 @@ logger = logging.getLogger(__name__)
 BASE_URL = "https://scientia-eu-v4-api-d1-03.azurewebsites.net/api/Public"
 INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
-# TODO: use uuid's for all identities
+
+def json_serialize(obj: typing.Any) -> str:
+    return msgspec.json.encode(obj).decode("utf-8")
+
 
 class API:
     def __init__(self, valkey_client: "cache_.ValkeyCache") -> None:
@@ -34,7 +38,7 @@ class API:
     def session(self) -> aiohttp.ClientSession:
         """The `aiohttp.ClientSession` to use for API requests."""
         if not self._session:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(json_serialize=json_serialize)
         return self._session
 
     async def _fetch_data(
@@ -103,7 +107,7 @@ class API:
             A full or partial course, module or location code to search for.
         cache : bool, default True
             Whether to cache the category.
-        items_type: type[BasicCategoryItem] | type [CategoryItem]
+        items_type : list[models.CategoryItemT]
             The item type to return with the category.
 
         Returns
@@ -196,7 +200,7 @@ class API:
         limit : int | None, default None
             The maximum number of category items to include when searching for `query`. If `None` will
             include all matching items. Ignored if no query is provided.
-        items_type: type[BasicCategoryItem] | type [CategoryItem]
+        items_type : list[models.CategoryItemT]
             The item type to return with the category.
 
         Returns
@@ -259,7 +263,7 @@ class API:
     async def fetch_category_item(
         self,
         category_type: models.CategoryType,
-        item_identity: str,
+        item_identity: UUID,
         cache: bool | None = None,
     ) -> models.CategoryItem:
         """Fetch a category item from the api.
@@ -268,7 +272,7 @@ class API:
         ----------
         category_type : models.CategoryType
             The type of category type of the item.
-        item_identity : str
+        item_identity : UUID
             The identity of the item.
         cache : bool, default True
             Whether to cache the timetables.
@@ -281,7 +285,7 @@ class API:
             json_data={
                 "CategoryTypesWithIdentities": [
                     {
-                        "CategoryTypeIdentity": category_type.value,
+                        "CategoryTypeIdentity": category_type,
                         "CategoryIdentities": [item_identity],
                     },
                 ]
@@ -300,15 +304,13 @@ class API:
 
     async def get_category_item(
         self,
-        item_identity: str,
+        item_identity: UUID,
     ) -> models.CategoryItem | None:
         """Get a category item from the cache.
 
         Parameters
         ----------
-        category_type : models.CategoryType
-            The type of category type of the item.
-        item_identity : str
+        item_identity : UUID
             The identity of the item.
         """
         return await self.cache.get_category_item(item_identity)
@@ -316,7 +318,7 @@ class API:
     async def fetch_category_items_timetables(
         self,
         category_type: models.CategoryType,
-        item_identities: list[str],
+        item_identities: list[UUID],
         start: datetime.datetime | None = None,
         end: datetime.datetime | None = None,
         cache: bool | None = None,
@@ -327,7 +329,7 @@ class API:
         ----------
         category_type : models.CategoryType
             The type of category to get timetables in.
-        item_identities : list[str]
+        item_identities : list[UUID]
             The identities of the items to get timetables for.
         start : datetime.datetime | None, default Aug 1 of the current academic year
             The start date/time of the timetable.
@@ -366,7 +368,7 @@ class API:
                 },
                 "CategoryTypesWithIdentities": [
                     {
-                        "CategoryTypeIdentity": category_type.value,
+                        "CategoryTypeIdentity": category_type,
                         "CategoryIdentities": item_identities,
                     }
                 ],
@@ -388,7 +390,7 @@ class API:
 
     async def get_category_item_timetable(
         self,
-        item_identity: str,
+        item_identity: UUID,
         start: datetime.datetime | None = None,
         end: datetime.datetime | None = None,
     ) -> models.CategoryItemTimetable | None:
@@ -396,9 +398,7 @@ class API:
 
         Parameters
         ----------
-        category_identity : str
-            The type of category to get the timetable in.
-        item_identity : str
+        item_identity : UUID
             The identity of the item to get the timetable for.
         start : datetime.datetime | None, default Aug 1 of the current academic year
             The start date/time of the timetable.

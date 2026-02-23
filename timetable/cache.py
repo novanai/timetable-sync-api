@@ -1,5 +1,6 @@
 import datetime
 import typing
+from uuid import UUID
 
 import msgspec
 from glide import (
@@ -101,7 +102,7 @@ class ValkeyCache:
     async def set_category_item(self, item: models.CategoryItem) -> None:
         await self._set(f"item:{item.identity}", item)
 
-    async def get_category_item(self, item_id: str) -> models.CategoryItem | None:
+    async def get_category_item(self, item_id: UUID) -> models.CategoryItem | None:
         return await self._get(f"item:{item_id}", models.CategoryItem)
 
     async def set_category_item_timetable(
@@ -114,7 +115,7 @@ class ValkeyCache:
         )
 
     async def get_category_item_timetable(
-        self, item_id: str
+        self, item_id: UUID
     ) -> models.CategoryItemTimetable | None:
         return await self._get(f"timetable:{item_id}", models.CategoryItemTimetable)
 

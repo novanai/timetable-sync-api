@@ -6,6 +6,7 @@ import enum
 import logging
 import re
 import typing as t
+from uuid import UUID
 
 import msgspec
 
@@ -78,16 +79,16 @@ CAMPUSES = {"AHC": "All Hallows", "GLA": "Glasnevin", "SPC": "St Patrick's"}
 BUILDINGS = {
     "GLA": {
         "A": "Albert College",
-        "B": "Invent Building",
+        "B": "International Academy",
         "C": "Henry Grattan Building",
         "CA": "Henry Grattan Extension",
         "D": "BEA Orpen Building",
         "E": "Estates Office",
         "F": "Multi-Storey Car Park",
-        "FT": "The Polaris Building",
-        "G": "NICB Building",
-        "GA": "NRF Building",
-        "H": "Nursing Building",
+        "FT": "Polaris Building",
+        "G": "Life Sciences Research Facility",
+        "GA": "Nano Research Facility Building",
+        "H": "Alice Reeves Building",
         "J": "Hamilton Building",
         "KA": "U Building / Student Centre",
         "L": "McNulty Building",
@@ -96,19 +97,19 @@ BUILDINGS = {
         "P": "Pavilion",
         "PR": "Restaurant",
         "Q": "Business School",
-        "QA": "MacCormac Reception",
+        "QA": "MacCormac Building",
         "R": "Creche",
         "S": "Stokes Building",
-        "SA": "Stokes Annex",
+        "SA": "Stokes Extension",
         "T": "Terence Larkin Theatre",
-        "U": "Accommodation & Sports Club",
+        "U": "Gym, Pool and Sports Complex",
         "V1": "Larkfield Residences",
         "V2": "Hampstead Residences",
         "VA": "Postgraduate Residences A",
-        "VB": "Postgraduate Residences B",
+        "VB": "Mary Brück Building / Postgraduate Residences B",
         "W": "College Park Residences",
         "X": "Lonsdale Building",
-        "Y": "O'Reilly Library",
+        "Y": "John and Aileen O'Reilly Library",
         "Z": "The Helix",
     },
     "SPC": {
@@ -130,7 +131,7 @@ BUILDINGS = {
 }
 
 
-class CategoryType(enum.Enum):
+class CategoryType(enum.StrEnum):
     """A category type."""
 
     MODULES = "525fe79b-73c3-4b5c-8186-83c652b3adcc"
@@ -254,7 +255,7 @@ class BasicCategoryItem(msgspec.Struct):
     - Modules: `"CSC1003[1] Computer Programming I"`
     - Locations: `"GLA.C117 & C122"`
     """
-    identity: str
+    identity: UUID
     """Unique identity of this category item."""
 
 
@@ -273,7 +274,7 @@ class CategoryItem(BasicCategoryItem, FromPayloadsMixin, msgspec.Struct):
     """
     category_type: CategoryType
     """The type of category this item belongs to."""
-    parent_categories: list[str]
+    parent_category_identities: list[UUID]
     """Unique identities of the faculty(s) this item belongs to."""
     code: str
     """The course, module or location code(s).
@@ -298,8 +299,10 @@ class CategoryItem(BasicCategoryItem, FromPayloadsMixin, msgspec.Struct):
         return cls(
             description=payload["Description"].strip() or None,
             category_type=cat_type,
-            parent_categories=payload["ParentCategoryIdentities"],
-            identity=payload["Identity"],
+            parent_category_identities=[
+                UUID(id_) for id_ in payload["ParentCategoryIdentities"]
+            ],
+            identity=UUID(payload["Identity"]),
             name=name,
             code=code.strip(),
         )
@@ -310,7 +313,7 @@ class CategoryItemTimetable(msgspec.Struct):
 
     category_type: CategoryType
     """The type of category this timetable is for."""
-    identity: str
+    identity: UUID
     """The identity of the category item this timetable is for."""
     name: str
     """- For courses, this is the course code.
@@ -327,8 +330,8 @@ class CategoryItemTimetable(msgspec.Struct):
     @classmethod
     def from_payload(cls, payload: dict[str, t.Any]) -> t.Self:
         return cls(
-            category_type=payload["CategoryTypeIdentity"],
-            identity=payload["Identity"],
+            category_type=CategoryType(payload["CategoryTypeIdentity"]),
+            identity=UUID(payload["Identity"]),
             name=payload["Name"],
             events=Event.from_payloads(payload["Results"]),
         )
@@ -337,13 +340,13 @@ class CategoryItemTimetable(msgspec.Struct):
 class Event(FromPayloadsMixin, msgspec.Struct):
     """A timetabled event."""
 
-    identity: str
+    identity: UUID
     """Unique identity of the event."""
     start: datetime.datetime
     """Start time of the event."""
     end: datetime.datetime
     """End time of the event."""
-    status_identity: str
+    status_identity: UUID
     """This appears to be an identity shared between events of the same activity type and number.
     ### Examples
     - L1 (Lecture 1) all share the same identity
@@ -424,10 +427,10 @@ class Event(FromPayloadsMixin, msgspec.Struct):
         )
 
         return cls(
-            identity=payload["Identity"],
+            identity=UUID(payload["Identity"]),
             start=datetime.datetime.fromisoformat(payload["StartDateTime"]),
             end=datetime.datetime.fromisoformat(payload["EndDateTime"]),
-            status_identity=payload["StatusIdentity"],
+            status_identity=UUID(payload["StatusIdentity"]),
             locations=locations,
             description=description,
             name=name,

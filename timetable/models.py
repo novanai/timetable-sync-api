@@ -55,7 +55,7 @@ matches:
 - SPA1035/30[1]OC/L1/01
 """
 
-SEMESTER_CODE = re.compile(r"\[[1|1,2|2|2,3|3|3,1|TM|AY]\]")
+SEMESTER_CODE = re.compile(r"\[(1|1,2|2|2,3|3|3,1|TM|AY)\]")
 
 EVENT_NAME_SUBSTITUTIONS: dict[str, str] = {
     " ": "",

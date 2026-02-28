@@ -676,7 +676,7 @@ nox = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.13.3" },
-    { name = "icalendar", specifier = ">=7.0.1" },
+    { name = "icalendar", specifier = ">=7.0.2" },
     { name = "msgspec", specifier = ">=0.20.0" },
     { name = "rapidfuzz", specifier = ">=3.14.3" },
     { name = "valkey-glide", specifier = ">=2.2.7" },
@@ -685,9 +685,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "pyright", specifier = ">=1.1.408" },
-    { name = "ruff", specifier = ">=0.15.2" },
+    { name = "ruff", specifier = ">=0.15.4" },
     { name = "types-icalendar", specifier = ">=6.3.2.20260223" },
-    { name = "uv", specifier = ">=0.10.4" },
+    { name = "uv", specifier = ">=0.10.7" },
 ]
 nox = [{ name = "nox", specifier = ">=2026.2.9" }]
 

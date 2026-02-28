@@ -1,4 +1,3 @@
-import dataclasses
 import datetime
 import enum
 import typing
@@ -6,11 +5,16 @@ import uuid
 
 import aiohttp
 import icalendar
-import orjson
-from rapidfuzz import fuzz
+import msgspec
+from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
-from timetable import __version__, utils
+from timetable import __version__
+
+if typing.TYPE_CHECKING:
+    from timetable import cache as cache_
+
+SITE = "dcuclubsandsocs.ie"
 
 
 class GroupType(enum.Enum):
@@ -22,8 +26,7 @@ class GroupType(enum.Enum):
     """A society."""
 
 
-@dataclasses.dataclass
-class Event:
+class Event(msgspec.Struct, tag=True, tag_field="struct_type"):
     """An event."""
 
     name: str
@@ -47,24 +50,8 @@ class Event:
     description: str
     """The event description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            end=datetime.datetime.fromisoformat(data["end"]),
-            day=data["day"],
-            cost=data["cost"],
-            capacity=data["capacity"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
 
-
-@dataclasses.dataclass
-class Activity:
+class Activity(msgspec.Struct, tag=True, tag_field="struct_type"):
     """A weekly activity."""
 
     name: str
@@ -86,23 +73,8 @@ class Activity:
     description: str
     """The activity description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            day=data["day"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            end=datetime.datetime.fromisoformat(data["end"]),
-            capacity=data["capacity"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
 
-
-@dataclasses.dataclass
-class Fixture:
+class Fixture(msgspec.Struct, tag=True, tag_field="struct_type"):
     """A fixture."""
 
     name: str
@@ -111,7 +83,7 @@ class Fixture:
     """The fixture poster."""
     start: datetime.datetime
     """The fixture's start time."""
-    competition: str
+    competition: str | None
     """The fixture competition."""
     type: str
     """The fixture type. Usually `HOME` or `AWAY`."""
@@ -120,26 +92,26 @@ class Fixture:
     description: str
     """The fixture description."""
 
-    @classmethod
-    def from_payload(cls, data: dict[str, typing.Any]) -> typing.Self:
-        return cls(
-            name=data["name"],
-            image=data["image"],
-            start=datetime.datetime.fromisoformat(data["start"]),
-            competition=data["competition"],
-            type=data["type"],
-            location=data["location"],
-            description=data["description"],
-        )
 
+class ClubSoc(msgspec.Struct):
+    """A club or society."""
 
-SITE = "dcuclubsandsocs.ie"
+    id: str
+    """The ID used in the club or society's page URL."""
+    name: str
+    """The club or society name."""
 
 
 class API:
-    def __init__(self, cns_address: str) -> None:
+    def __init__(self, cns_address: str, valkey_client: "cache_.ValkeyCache") -> None:
         self.cns_address = cns_address
+        self._cache = valkey_client
         self._session: aiohttp.ClientSession | None = None
+
+    @property
+    def cache(self) -> "cache_.ValkeyCache":
+        """The Valkey client to use for caching."""
+        return self._cache
 
     @property
     def session(self) -> aiohttp.ClientSession:
@@ -148,65 +120,93 @@ class API:
             self._session = aiohttp.ClientSession()
         return self._session
 
-    async def get_data(self, url: str) -> typing.Any:
+    async def get_data(self, url: str) -> bytes:
         async with self.session.request("GET", f"{self.cns_address}/{url}") as r:
             r.raise_for_status()
-            return await r.json(loads=orjson.loads)
+            return await r.read()
 
     async def fetch_group_events_activities_fixtures(
         self,
         group_type: GroupType,
         identity: str,
     ) -> list[Activity | Event | Fixture]:
-        events = [
-            Event.from_payload(d)
-            for d in await self.get_data(f"{SITE}/{group_type.value}/{identity}/events")
-        ]
-        activities = [
-            Activity.from_payload(d)
-            for d in await self.get_data(
-                f"{SITE}/{group_type.value}/{identity}/activities"
-            )
-        ]
-        fixtures = [
-            Fixture.from_payload(d)
-            for d in await self.get_data(
-                f"{SITE}/{group_type.value}/{identity}/fixtures"
-            )
-        ]
-
-        return [*events, *activities, *fixtures]
-
-    async def fetch_unlocked_groups(
-        self, group_type: GroupType
-    ) -> list[utils.BasicCategoryItem]:
-        return [
-            utils.BasicCategoryItem(name=d["name"], identity=d["id"])
-            for d in await self.get_data(f"{SITE}/{group_type.value}")
-            if not d["is_locked"]
-        ]
-
-    async def fetch_group_info(
-        self, group_type: GroupType, identity: str
-    ) -> utils.BasicCategoryItem:
-        d = await self.get_data(f"{SITE}/{group_type.value}/{identity}")
-        return utils.BasicCategoryItem(name=d["name"], identity=identity)
-
-
-def filter_category_results(
-    categories: list[utils.BasicCategoryItem], query: str
-) -> list[utils.BasicCategoryItem]:
-    results: typing.Iterable[tuple[utils.BasicCategoryItem, float]] = []
-
-    for item in categories:
-        ratio = fuzz.partial_ratio(
-            query, item.name, processor=fuzz_utils.default_process
+        events = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/events"),
+            type=list[Event],
         )
-        results.append((item, ratio))
+        activities = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/activities"),
+            type=list[Activity],
+        )
+        fixtures = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}/fixtures"),
+            type=list[Fixture],
+        )
 
-    results = filter(lambda r: r[1] > 80, results)
-    results = sorted(results, key=lambda r: r[1], reverse=True)
-    return [r[0] for r in results]
+        all_events = [*events, *activities, *fixtures]
+
+        await self.cache.set_cns_item_events(identity, all_events)
+
+        return all_events
+
+    async def get_group_events_activities_fixtures(
+        self,
+        identity: str,
+    ) -> list[Activity | Event | Fixture] | None:
+        return await self.cache.get_cns_item_events(identity)
+
+    async def fetch_group_items(
+        self, group_type: GroupType, query: str | None = None
+    ) -> list[ClubSoc]:
+        items = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}"),
+            type=list[ClubSoc],
+        )
+
+        await self.cache.set_cns_group_items(group_type, items)
+
+        if query and query.strip():
+            return self._filter_group_items(items, query)
+
+        return items
+
+    async def get_group_items(
+        self, group_type: GroupType, query: str | None = None
+    ) -> list[ClubSoc] | None:
+        items = await self.cache.get_cns_group_items(group_type)
+
+        if not items:
+            return None
+
+        if query and query.strip():
+            return self._filter_group_items(items, query)
+
+        return items
+
+    async def fetch_item(self, group_type: GroupType, identity: str) -> ClubSoc:
+        item = msgspec.json.decode(
+            await self.get_data(f"{SITE}/{group_type.value}/{identity}"), type=ClubSoc
+        )
+
+        await self.cache.set_cns_group_item(item)
+
+        return item
+
+    async def get_item(self, identity: str) -> ClubSoc | None:
+        return await self.cache.get_cns_group_item(identity)
+
+    def _filter_group_items(self, items: list[ClubSoc], query: str) -> list[ClubSoc]:
+        names = [item.name for item in items]
+
+        matches = process.extract(
+            query,
+            names,
+            scorer=fuzz.partial_ratio,
+            processor=fuzz_utils.default_process,
+            score_cutoff=80,
+        )
+
+        return [items[idx] for _, _, idx in matches]
 
 
 def generate_ical_file(events: dict[str, list[Event | Activity | Fixture]]) -> bytes:

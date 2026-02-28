@@ -2,14 +2,17 @@ import asyncio
 import datetime
 import logging
 import typing
+from uuid import UUID
 
 import aiohttp
-import orjson
-from rapidfuzz import fuzz
+import msgspec
+from rapidfuzz import fuzz, process
 from rapidfuzz import utils as fuzz_utils
 
 from timetable import __version__, models, utils
-from timetable import cache as cache_
+
+if typing.TYPE_CHECKING:
+    from timetable import cache as cache_
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +20,17 @@ BASE_URL = "https://scientia-eu-v4-api-d1-03.azurewebsites.net/api/Public"
 INSTITUTION_IDENTITY = "a1fdee6b-68eb-47b8-b2ac-a4c60c8e6177"
 
 
+def json_serialize(obj: typing.Any) -> str:
+    return msgspec.json.encode(obj).decode("utf-8")
+
+
 class API:
-    def __init__(self, valkey_client: cache_.ValkeyCache) -> None:
+    def __init__(self, valkey_client: "cache_.ValkeyCache") -> None:
         self._cache = valkey_client
         self._session: aiohttp.ClientSession | None = None
 
-    @classmethod
-    async def create(cls, valkey_host: str, valkey_port: int) -> typing.Self:
-        valkey_client = await cache_.ValkeyCache.create(valkey_host, valkey_port)
-        return cls(valkey_client)
-
     @property
-    def cache(self) -> cache_.ValkeyCache:
+    def cache(self) -> "cache_.ValkeyCache":
         """The Valkey client to use for caching."""
         return self._cache
 
@@ -36,7 +38,7 @@ class API:
     def session(self) -> aiohttp.ClientSession:
         """The `aiohttp.ClientSession` to use for API requests."""
         if not self._session:
-            self._session = aiohttp.ClientSession()
+            self._session = aiohttp.ClientSession(json_serialize=json_serialize)
         return self._session
 
     async def _fetch_data(
@@ -85,7 +87,7 @@ class API:
                     await asyncio.sleep(5)
                     continue
 
-                return await res.json(loads=orjson.loads)
+                return await res.json(loads=msgspec.json.decode)
 
     async def fetch_category(
         self,
@@ -93,7 +95,8 @@ class API:
         *,
         query: str | None = None,
         cache: bool | None = None,
-    ) -> models.Category:
+        items_type: type[models.CategoryItemT],
+    ) -> models.Category[models.CategoryItemT]:
         """Fetch a category.
 
         Parameters
@@ -104,6 +107,8 @@ class API:
             A full or partial course, module or location code to search for.
         cache : bool, default True
             Whether to cache the category.
+        items_type : list[models.CategoryItemT]
+            The item type to return with the category.
 
         Returns
         -------
@@ -119,6 +124,8 @@ class API:
 
         results: list[dict[str, typing.Any]] = []
 
+        # NOTE: there is an "itemsPerPage" param but it does nothing,
+        # every page is always 20 items
         params: dict[str, str] = {
             "pageNumber": "1",
             "query": query.strip() if query else "",
@@ -153,23 +160,35 @@ class API:
                 results.extend(d["Results"])
 
         final_data = {"Results": results, "Count": count}
+        category = models.Category[models.CategoryItem].from_payload(final_data)
 
         if (query is None or not query.strip()) and cache:
-            await self.cache.set(
-                category_type.value,
-                final_data,
-                expires_in=datetime.timedelta(days=1),
+            await self.cache.set_category(
+                category_type,
+                category,
             )
 
-        return models.Category.from_payload(final_data)
+        # NOTE: pyright complains about this because of the way I manually set
+        # the item type but don't worry - it is correct and pyright can shut up
+        if items_type is models.BasicCategoryItem:
+            return models.Category(  # pyright: ignore[reportReturnType]
+                items=[
+                    models.BasicCategoryItem(name=item.name, identity=item.identity)
+                    for item in category.items
+                ],
+                count=category.count,
+            )
+
+        return category  # pyright: ignore[reportReturnType]
 
     async def get_category(
         self,
         category_type: models.CategoryType,
         *,
         query: str | None = None,
-        count: int | None = None,
-    ) -> models.Category | None:
+        limit: int | None = None,
+        items_type: type[models.CategoryItemT],
+    ) -> models.Category[models.CategoryItemT] | None:
         """Get a category from the cache.
 
         Parameters
@@ -178,9 +197,11 @@ class API:
             The category type.
         query : str | None, default None
             A full or partial course, module or location code to search for.
-        count : int | None, default None
+        limit : int | None, default None
             The maximum number of category items to include when searching for `query`. If `None` will
             include all matching items. Ignored if no query is provided.
+        items_type : list[models.CategoryItemT]
+            The item type to return with the category.
 
         Returns
         -------
@@ -189,14 +210,12 @@ class API:
         None
             If the category was not cached or is outdated.
         """
-        data = await self.cache.get(category_type.value)
-        if data is None:
+        category = await self.cache.get_category(category_type, items_type)
+        if category is None:
             return None
 
-        category = models.Category.from_payload(data)
-
         if query and query.strip():
-            filtered = self._filter_category_items_for(category.items, query, count)
+            filtered = self._filter_category_items_for(category.items, query, limit)
             return models.Category(
                 filtered,
                 len(filtered),
@@ -206,52 +225,46 @@ class API:
 
     def _filter_category_items_for(
         self,
-        category_items: list[models.CategoryItem],
+        category_items: list[models.CategoryItemT],
         query: str,
-        count: int | None,
-    ) -> list[models.CategoryItem]:
+        limit: int | None,
+    ) -> list[models.CategoryItemT]:
         """Filter category items for `query`, only returning items with a >80% match.
 
         Parameters
         ----------
-        category_items : list[models.CategoryItem]
+        category_items : list[models.CategoryItemT]
             The category items to filter.
         query : str
             The query to filter for. Checks against the category's name and code.
-        count : int | None
+        limit : int | None
             The maximum number of category items to include when searching for `query`.
             If `None` will include all matching items.
 
         Returns
         -------
-        list[models.CategoryItem]
+        list[models.CategoryItemT]
             The items which matched the search query with a >80% match,
             sorted from highest match to lowest.
         """
-        count = count if count is not None else len(category_items)
-        results: typing.Iterable[tuple[models.CategoryItem, float]] = []
+        names = [item.name for item in category_items]
 
-        for item in category_items:
-            # NOTE: `item.description` is not used in the filtering because it does not provide
-            # enough unique information that cannot be provided by `name` or `code`
-            item_ratios = [
-                fuzz.partial_ratio(
-                    query, item.name, processor=fuzz_utils.default_process
-                ),
-                fuzz.partial_ratio(
-                    query, item.code, processor=fuzz_utils.default_process
-                ),
-            ]
-            results.append((item, max(item_ratios)))
+        matches = process.extract(
+            query,
+            names,
+            scorer=fuzz.partial_ratio,
+            processor=fuzz_utils.default_process,
+            limit=limit,
+            score_cutoff=80,
+        )
 
-        results = filter(lambda r: r[1] > 85, results)
-        results = sorted(results, key=lambda r: r[1], reverse=True)
-        return [r[0] for r in results[:count]]
+        return [category_items[idx] for _, _, idx in matches]
 
     async def fetch_category_item(
         self,
         category_type: models.CategoryType,
-        item_identity: str,
+        item_identity: UUID,
+        cache: bool | None = None,
     ) -> models.CategoryItem:
         """Fetch a category item from the api.
 
@@ -259,16 +272,20 @@ class API:
         ----------
         category_type : models.CategoryType
             The type of category type of the item.
-        item_identity : str
+        item_identity : UUID
             The identity of the item.
+        cache : bool, default True
+            Whether to cache the timetables.
         """
+        if cache is None:
+            cache = True
 
         data = await self._fetch_data(
             f"CategoryTypes/Categories/Filter/{INSTITUTION_IDENTITY}",
             json_data={
                 "CategoryTypesWithIdentities": [
                     {
-                        "CategoryTypeIdentity": category_type.value,
+                        "CategoryTypeIdentity": category_type,
                         "CategoryIdentities": [item_identity],
                     },
                 ]
@@ -276,37 +293,32 @@ class API:
         )
 
         if not data:
-            raise ValueError("Invalid item ID provided.")
+            raise models.InvalidCodeError(item_identity)
 
-        return models.CategoryItem.from_payload(data[0])
+        item = models.CategoryItem.from_payload(data[0])
+
+        if cache:
+            await self.cache.set_category_item(item)
+
+        return item
 
     async def get_category_item(
         self,
-        category_type: models.CategoryType,
-        item_identity: str,
+        item_identity: UUID,
     ) -> models.CategoryItem | None:
         """Get a category item from the cache.
 
         Parameters
         ----------
-        category_type : models.CategoryType
-            The type of category type of the item.
-        item_identity : str
+        item_identity : UUID
             The identity of the item.
         """
-        category = await self.get_category(category_type)
-        if not category:
-            return None
-
-        try:
-            return next(filter(lambda i: i.identity == item_identity, category.items))
-        except StopIteration:
-            return None
+        return await self.cache.get_category_item(item_identity)
 
     async def fetch_category_items_timetables(
         self,
         category_type: models.CategoryType,
-        item_identities: list[str],
+        item_identities: list[UUID],
         start: datetime.datetime | None = None,
         end: datetime.datetime | None = None,
         cache: bool | None = None,
@@ -317,7 +329,7 @@ class API:
         ----------
         category_type : models.CategoryType
             The type of category to get timetables in.
-        item_identities : list[str]
+        item_identities : list[UUID]
             The identities of the items to get timetables for.
         start : datetime.datetime | None, default Aug 1 of the current academic year
             The start date/time of the timetable.
@@ -356,7 +368,7 @@ class API:
                 },
                 "CategoryTypesWithIdentities": [
                     {
-                        "CategoryTypeIdentity": category_type.value,
+                        "CategoryTypeIdentity": category_type,
                         "CategoryIdentities": item_identities,
                     }
                 ],
@@ -372,18 +384,13 @@ class API:
             timetables.append(timetable)
 
             if cache:
-                await self.cache.set(
-                    f"{category_type.value}.{timetable.identity}",
-                    timetable_data,
-                    expires_in=datetime.timedelta(hours=12),
-                )
+                await self.cache.set_category_item_timetable(timetable)
 
         return timetables
 
     async def get_category_item_timetable(
         self,
-        category_identity: str,
-        item_identity: str,
+        item_identity: UUID,
         start: datetime.datetime | None = None,
         end: datetime.datetime | None = None,
     ) -> models.CategoryItemTimetable | None:
@@ -391,9 +398,7 @@ class API:
 
         Parameters
         ----------
-        category_identity : str
-            The type of category to get the timetable in.
-        item_identity : str
+        item_identity : UUID
             The identity of the item to get the timetable for.
         start : datetime.datetime | None, default Aug 1 of the current academic year
             The start date/time of the timetable.
@@ -407,11 +412,9 @@ class API:
         None
             If the timetable was not cached or is outdated.
         """
-        data = await self.cache.get(f"{category_identity}.{item_identity}")
-        if data is None:
+        timetable = await self.cache.get_category_item_timetable(item_identity)
+        if timetable is None:
             return None
-
-        timetable = models.CategoryItemTimetable.from_payload(data)
 
         if start or end:
             start, end = utils.calc_start_end_range(start, end)

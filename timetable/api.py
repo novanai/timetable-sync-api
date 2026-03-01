@@ -378,13 +378,14 @@ class API:
         timetables: list[models.CategoryItemTimetable] = []
         for timetable_data in data["CategoryEvents"]:
             timetable = models.CategoryItemTimetable.from_payload(timetable_data)
+
+            if cache:
+                await self.cache.set_category_item_timetable(timetable)
+
             timetable.events = list(
                 filter(lambda e: start <= e.start <= end, timetable.events)
             )
             timetables.append(timetable)
-
-            if cache:
-                await self.cache.set_category_item_timetable(timetable)
 
         return timetables
 
